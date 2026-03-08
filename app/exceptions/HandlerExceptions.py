@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from app.core.context import current_http_identifier
 from app.core.environments import APP_ENV, LOGGER_EXCEPTIONS_ENABLED, ROOT_DIR
@@ -41,6 +42,24 @@ async def app_exception_handler(request: Request, exc: AppHttpException):
             detail_error["loc"] = exc.loc
 
     return JSONResponse(status_code=exc.status_code, content={"detail": detail_error})
+
+
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    detail_error = {
+        "msg": f"Demasiadas solicitudes. Límite: {exc.detail}",
+        "type": "RateLimitExceeded",
+    }
+
+    if LOGGER_EXCEPTIONS_ENABLED:
+        logger_params = [
+            str(current_http_identifier.get()),
+            "Exception: RateLimitExceeded",
+            f"Limit: {exc.detail}",
+            f"IP: {request.client.host if request.client else 'unknown'}",
+        ]
+        logger.warning(" | ".join(logger_params))
+
+    return JSONResponse(status_code=429, content={"detail": detail_error})
 
 
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
