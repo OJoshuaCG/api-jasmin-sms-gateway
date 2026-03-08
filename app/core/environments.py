@@ -38,6 +38,11 @@ LOGGER_EXCEPTIONS_ENABLED = (
 # ======= Docs variables ======= #
 DOCS_ENABLED = os.getenv("DOCS_ENABLED", "True").lower() == "true"
 
+# ======= CORS variables ======= #
+_cors_origins_raw = os.getenv("CORS_ORIGINS", "*")
+CORS_ORIGINS: list[str] = [
+    origin.strip() for origin in _cors_origins_raw.split(",") if origin.strip()
+]
 
 # ======= Database variables ======= #
 DB_HOST = os.getenv("DB_HOST", "localhost")

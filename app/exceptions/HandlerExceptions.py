@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.core.context import current_http_identifier
@@ -40,6 +41,39 @@ async def app_exception_handler(request: Request, exc: AppHttpException):
             detail_error["loc"] = exc.loc
 
     return JSONResponse(status_code=exc.status_code, content={"detail": detail_error})
+
+
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    _LOCATION_PREFIXES = {"body", "query", "path", "header"}
+
+    fields_with_errors = []
+    for error in exc.errors():
+        loc = error.get("loc", ())
+        field_parts = [str(p) for p in loc if p not in _LOCATION_PREFIXES]
+        field = ".".join(field_parts) if field_parts else str(loc)
+        fields_with_errors.append({"field": field, "msg": error.get("msg", "")})
+
+    field_names = [f["field"] for f in fields_with_errors]
+    msg = (
+        f"Error de validación en: {', '.join(field_names)}"
+        if field_names
+        else "Error de validación en los datos enviados"
+    )
+
+    detail_error = {"msg": msg, "type": "RequestValidationError"}
+
+    if APP_ENV == "development":
+        detail_error["context"] = fields_with_errors
+
+    if LOGGER_EXCEPTIONS_ENABLED:
+        logger_params = [
+            str(current_http_identifier.get()),
+            "Exception: RequestValidationError",
+            f"Fields: {', '.join(field_names)}",
+        ]
+        logger.warning(" | ".join(logger_params))
+
+    return JSONResponse(status_code=422, content={"detail": detail_error})
 
 
 async def generic_exception_handler(request: Request, exc: Exception):
