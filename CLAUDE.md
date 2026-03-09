@@ -4,421 +4,488 @@ Este documento proporciona contexto y guías para agentes de IA que trabajen en 
 
 ## Descripción del Proyecto
 
-Este es un **template de FastAPI** diseñado para ser la base de nuevos proyectos. Incluye configuración robusta, mejores prácticas y herramientas esenciales para desarrollo profesional.
-
-### Propósito
-
-- Servir como punto de partida para proyectos FastAPI
-- Proporcionar estructura y patrones consistentes
-- Incluir herramientas de calidad de código desde el inicio
-- Facilitar el desarrollo rápido sin sacrificar calidad
+**Template de FastAPI** diseñado para ser la base de nuevos proyectos. Incluye configuración robusta, mejores prácticas y herramientas esenciales para desarrollo profesional.
 
 ### Arquitectura: Pseudo-MVC (Sin Vista)
 
-El proyecto sigue un patrón **MVC sin Vista** ya que es puro backend:
-
 **Routes → Controllers → Models → Database**
 
-- **Routes** (`app/routes/`): Definen endpoints y validan entrada (Pydantic schemas)
+- **Routes** (`app/routes/`): Definen endpoints, validan entrada con Pydantic schemas
 - **Controllers** (`app/controllers/`): Lógica de negocio y orquestación
 - **Models** (`app/models/`): Interacción con base de datos (SQL directo o ORM)
 
-## Arquitectura del Proyecto
+### Arquitectura de API Versioning
 
-### Estructura de Carpetas
+Cada versión de API es una **sub-app FastAPI independiente** montada en el app principal:
+
+```
+main.py (FastAPI principal)
+  ├── GET /health          ← en el app principal, sin middlewares de versión
+  ├── /api/v1 → v1_app    ← sub-app con su propio stack de middlewares
+  └── /api/v2 → v2_app    ← sub-app independiente (a futuro)
+```
+
+`create_versioned_app()` en `app/core/versioned_app.py` crea sub-apps con todo configurado: middlewares, handlers de excepciones, rate limiting, CORS, documentación.
+
+## Estructura de Carpetas
 
 ```
 fastapi-template/
-├── app/                    # Código principal de la aplicación
-│   ├── core/               # Módulos centrales (database, logger, context, environments)
-│   ├── controllers/        # Controladores con lógica de negocio (MVC)
-│   ├── exceptions/         # Excepciones personalizadas y handlers
-│   ├── middleware/         # Middlewares (Context, Logger)
-│   ├── models/             # Modelos para interacción con BD
-│   │   ├── *.py            # Modelos ORM (SQLAlchemy) - para migraciones
-│   │   └── *_model.py      # Modelos de datos (SQL directo) - opcional
-│   ├── routes/             # Endpoints de la API (Routes en MVC)
-│   ├── schemas/            # Schemas Pydantic para validación (opcional)
-│   └── utils/              # Funciones utilitarias
-├── alembic/                # Sistema de migraciones de base de datos
-│   ├── versions/           # Archivos de migración generados
-│   └── env.py              # Configuración de Alembic
-├── docs/                   # Documentación del proyecto
-│   ├── features/           # Documentación de características
-│   └── development/        # Guías de desarrollo
-├── main.py                 # Punto de entrada de FastAPI
-├── pyproject.toml          # Dependencias y configuración del proyecto
-├── .env.example            # Template de variables de entorno
-└── .gitignore              # Archivos ignorados por git
+├── app/
+│   ├── core/
+│   │   ├── environments.py     # Todas las variables de entorno
+│   │   ├── logger.py           # Sistema de logging centralizado
+│   │   ├── context.py          # ContextVars de request (Request ID, IP, etc.)
+│   │   ├── database.py         # Gestión de conexiones (pool SQLAlchemy)
+│   │   ├── limiter.py          # Singleton Limiter de SlowAPI
+│   │   └── versioned_app.py    # Factory create_versioned_app()
+│   ├── controllers/            # Lógica de negocio (MVC)
+│   ├── exceptions/
+│   │   ├── AppHttpException.py # Excepción personalizada con tracking
+│   │   ├── HandlerExceptions.py# Handlers globales de excepciones
+│   │   └── __init__.py
+│   ├── middleware/
+│   │   ├── ContextMiddleware.py    # Request ID + ContextVars
+│   │   ├── LoggerMiddleware.py     # Logging de requests/responses
+│   │   └── RequestSizeMiddleware.py# Límite de tamaño de request
+│   ├── models/
+│   │   ├── base.py             # DeclarativeBase + TimestampMixin SQLAlchemy 2.0
+│   │   ├── user.py             # Modelo ORM de ejemplo
+│   │   ├── *_model.py          # Modelos de datos (SQL directo)
+│   │   └── __init__.py         # CRÍTICO: todos los modelos deben importarse aquí
+│   ├── routes/
+│   │   ├── health.py           # GET /health (en app principal)
+│   │   └── v1/
+│   │       ├── __init__.py     # Router v1 que agrupa sub-routers
+│   │       └── test.py         # Endpoints de ejemplo/testing
+│   ├── schemas/                # Schemas Pydantic (opcional)
+│   └── utils/
+│       ├── response.py         # ApiResponse[T], success(), paginated(), empty()
+│       ├── pagination.py       # PaginationParams, PaginationDep
+│       ├── file_upload.py      # save_upload(), save_uploads()
+│       └── dict_utils.py       # Sanitización de dicts (usado por database.py)
+├── alembic/
+│   ├── versions/               # Migraciones generadas
+│   └── env.py                  # Configuración Alembic integrada con el proyecto
+├── docs/                       # Documentación completa
+│   ├── features/               # Por feature: cors, rate-limiting, pagination, etc.
+│   └── development/            # Guías de desarrollo
+├── uploads/                    # Archivos temporales de upload (.gitkeep)
+├── main.py                     # Punto de entrada
+├── pyproject.toml              # Dependencias y configuración
+└── .env.example                # Template de variables de entorno
 ```
 
-### Componentes Clave
+## Componentes Clave
 
-#### 1. Core (`app/core/`)
+### `app/core/environments.py`
 
-- **`environments.py`**: Centraliza todas las variables de entorno. Usa `python-dotenv` para cargar desde `.env`.
-  - Variables de aplicación: `APP_ENV`, `APP_NAME`, `SECRET_KEY`
-  - Variables de logging: `LOGGER_LEVEL`, `LOGGER_MIDDLEWARE_ENABLED`, etc.
-  - Variables de base de datos: `DB_HOST`, `DB_USER`, `DB_PASS`, `DB_NAME`, `DB_PORT`
+Central de todas las variables de entorno. Al agregar una nueva variable, siempre agregarla aquí y documentarla en `.env.example`.
 
-- **`logger.py`**: Sistema de logging centralizado
-  - Función `get_logger(name, level)` que retorna un logger configurado
-  - Evita duplicación de handlers
-  - Formato consistente: `%(asctime)s [%(levelname)s] %(message)s`
+Variables actuales:
 
-- **`context.py`**: ContextVars para mantener estado de request
-  - Similar a sesiones en PHP, pero basado en contexto asíncrono
-  - Variables disponibles: `current_http_identifier`, `current_request_ip`, `current_request_method`, `current_request_route`, `current_user_id`, etc.
-  - Establecidas automáticamente por `ContextMiddleware`
-
-- **`database.py`**: Gestión de conexiones a base de datos
-  - Clase `Database` con soporte para SQL directo y ORM
-  - Métodos principales:
-    - `execute_query()`: Ejecuta SQL directo con parámetros
-    - `call_procedure()`: Llama stored procedures de MySQL
-    - `get_declarative_base_session()`: Retorna sesión para ORM SQLAlchemy
-  - Configuración: MySQL con `utf8mb4` charset y `utf8mb4_general_ci` collation
-  - Pool de conexiones configurado (size=10, max_overflow=20, recycle=180s)
-
-#### 2. Exceptions (`app/exceptions/`)
-
-- **`AppHttpException.py`**: Excepción personalizada que hereda de `HTTPException`
-  - Captura automáticamente ubicación del error (archivo, función, línea, código)
-  - Soporta contexto adicional para debugging
-  - Ejemplo:
-    ```python
-    raise AppHttpException(
-        message="Usuario no encontrado",
-        status_code=404,
-        context={"user_id": user_id}
-    )
-    ```
-
-- **`HandlerExceptions.py`**: Manejadores globales de excepciones
-  - `app_exception_handler`: Maneja `AppHttpException`
-  - `generic_exception_handler`: Maneja excepciones no controladas
-  - En desarrollo (`APP_ENV=development`): Retorna detalles completos del error
-  - En producción: Oculta detalles técnicos por seguridad
-  - Logging opcional controlado por `LOGGER_EXCEPTIONS_ENABLED`
-
-#### 3. Middleware (`app/middleware/`)
-
-- **`ContextMiddleware.py`**: **DEBE ejecutarse primero**
-  - Genera Request ID único (`secrets.token_hex(8)`)
-  - Establece ContextVars con información de la request
-  - Inyecta header `X-Request-ID` en respuestas
-  - Limpia ContextVars al finalizar (previene memory leaks)
-
-- **`LoggerMiddleware.py`**: Logging de requests/responses
-  - Depende de `ContextMiddleware` para obtener Request ID
-  - Registra método, path, query params, body, headers (opcional)
-  - Calcula tiempo de procesamiento
-  - Oculta información sensible en rutas específicas (ej: `/user/login`)
-  - Controlado por `LOGGER_MIDDLEWARE_ENABLED`
-
-**Orden de middlewares en `main.py`:**
 ```python
-if LOGGER_MIDDLEWARE_ENABLED:
-    app.add_middleware(LoggerMiddleware)  # Se ejecuta segundo
-app.add_middleware(ContextMiddleware)     # Se ejecuta primero
+# App
+APP_ENV        # development | production
+APP_NAME       # Nombre de la aplicación
+SECRET_KEY     # Clave secreta
+DOCS_ENABLED   # True/False — habilitar /docs y /redoc
+
+# Logger
+LOGGER_LEVEL                        # DEBUG|INFO|WARNING|ERROR|CRITICAL
+LOGGER_MIDDLEWARE_ENABLED           # True/False
+LOGGER_MIDDLEWARE_SHOW_HEADERS      # True/False
+LOGGER_MIDDLEWARE_SHOW_QUERY_PARAMS # True/False
+LOGGER_MIDDLEWARE_SHOW_BODY         # True/False
+LOGGER_MIDDLEWARE_SHOW_PATH_PARAMS  # True = path real, False = template
+LOGGER_EXCEPTIONS_ENABLED          # True/False
+
+# Database
+DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
+
+# CORS
+CORS_ORIGINS   # Orígenes separados por coma. "*" para todos
+
+# Rate Limiting
+RATE_LIMIT_DEFAULT  # "100/minute", "10/second", "1000/hour"
+
+# Pagination
+PAGINATION_MAX_SIZE  # Default 50, hard cap en código: 200
+
+# Request Size
+REQUEST_MAX_SIZE_MB  # Default 10
 ```
 
-#### 4. Models (`app/models/`)
+### `app/core/versioned_app.py` — Factory de Sub-Apps
 
-- **`base.py`**: Configuración base de SQLAlchemy 2.0
-  - `NAMING_CONVENTION`: Convenciones para nombres de constraints
-  - `Base`: DeclarativeBase con metadata configurada
-  - `TimestampMixin`: Mixin reutilizable para campos `created_at` y `updated_at`
+```python
+def create_versioned_app(
+    version: str,
+    excluded_request_size_paths: list[str] | None = None
+) -> FastAPI:
+```
 
-- **`user.py`**: Modelo de ejemplo
-  - Usa sintaxis moderna de SQLAlchemy 2.0: `Mapped[]`, `mapped_column()`
-  - Hereda `TimestampMixin` para timestamps automáticos
-  - Campos: id, username, email, hashed_password, full_name, notes, is_active, is_superuser
+Configura automáticamente en orden de ejecución:
+1. `RequestSizeMiddleware` — rechaza requests grandes
+2. `CORSMiddleware` — CORS con `CORS_ORIGINS`
+3. `ContextMiddleware` — Request ID + ContextVars
+4. `LoggerMiddleware` — logging (si `LOGGER_MIDDLEWARE_ENABLED`)
+5. `SlowAPIMiddleware` — rate limiting
 
-- **`__init__.py`**: **CRÍTICO** - Todos los modelos deben importarse aquí
-  - Alembic detecta modelos solo si están en `__all__`
-  - Ejemplo: `from app.models.user import User` + `__all__ = ["Base", "TimestampMixin", "User"]`
+También registra los 4 handlers de excepciones: `AppHttpException`, `RequestValidationError`, `RateLimitExceeded`, `Exception`.
 
-#### 5. Alembic (Migraciones)
+### `app/core/limiter.py`
 
-- Configuración en `alembic/env.py` integrada con el proyecto
-- Importa variables de entorno desde `app.core.environments`
-- Importa modelos desde `app.models` (usa `Base.metadata`)
-- Configuración MySQL específica (charset, timezone UTC)
-- Ver `README_MIGRATIONS.md` para guía completa
+Singleton `Limiter` de SlowAPI compartido entre todas las versiones. Importar directamente para usar `@limiter.limit()`.
 
-## Flujo de Trabajo Recomendado
+### `app/utils/response.py`
 
-### Creación de Nuevas Features
+Estandariza todas las respuestas exitosas con `ApiResponse[T]`.
 
-1. **Crear modelo** (si necesita BD):
-   ```python
-   # app/models/post.py
-   from app.models.base import Base, TimestampMixin
-   class Post(Base, TimestampMixin):
-       __tablename__ = "posts"
-       # ... definir campos
-   ```
+```python
+from app.utils.response import ApiResponse, success, paginated, empty
 
-2. **Importar modelo** en `app/models/__init__.py`:
-   ```python
-   from app.models.post import Post
-   __all__ = [..., "Post"]
-   ```
+# Respuesta con datos
+return success(data=obj)
+return success(data=obj, message="Creado exitosamente")
 
-3. **Generar migración**:
-   ```bash
-   uv run alembic revision --autogenerate -m "add posts table"
-   ```
+# Lista paginada
+return paginated(items, total=total, pagination=pagination)
 
-4. **Revisar migración** en `alembic/versions/` antes de aplicar
+# Sin datos (DELETE, acciones void)
+return empty("Eliminado exitosamente")
+return empty()
+```
 
-5. **Aplicar migración**:
-   ```bash
-   uv run alembic upgrade head
-   ```
+Los campos `None` se excluyen automáticamente del JSON (via `@model_serializer`). No usar `response_model_exclude_none=True` en cada endpoint.
 
-6. **Crear modelo** en `app/models/` (si necesita BD):
-   ```python
-   # app/models/post_model.py
-   from app.core.database import Database
-   from app.core.environments import DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
+### `app/utils/pagination.py`
 
-   class PostModel:
-       def __init__(self):
-           self.db = Database(DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT)
+```python
+from app.utils.pagination import PaginationDep
 
-       def find_by_id(self, post_id: int):
-           return self.db.execute_query(
-               "SELECT * FROM posts WHERE id = :id",
-               {"id": post_id},
-               fetchone=True
-           )
+@router.get("/", response_model=ApiResponse[list[ItemOut]])
+async def list_items(pagination: PaginationDep):
+    items = model.find_all(limit=pagination.size, offset=pagination.offset)
+    total = model.count()
+    return paginated(items, total=total, pagination=pagination)
+```
 
-       def create(self, post_data: dict):
-           return self.db.execute_query(
-               "INSERT INTO posts (...) VALUES (...)",
-               post_data
-           )
-   ```
+`PaginationDep = Annotated[PaginationParams, Depends(PaginationParams)]`. Query params: `?page=1&size=20`.
 
-7. **Crear controlador** en `app/controllers/`:
-   ```python
-   # app/controllers/post_controller.py
-   from app.models.post_model import PostModel
-   from app.exceptions import AppHttpException
+### `app/utils/file_upload.py`
 
-   class PostController:
-       def __init__(self):
-           self.post_model = PostModel()
+```python
+from app.utils.file_upload import save_upload, save_uploads
 
-       def get_post(self, post_id: int):
-           post = self.post_model.find_by_id(post_id)
-           if not post:
-               raise AppHttpException("Post no encontrado", 404)
-           return post
+file_info = await save_upload(
+    file,
+    allowed_types=["image/jpeg", "image/png"],
+    max_size_mb=2,
+)
+file_path = Path(file_info["path"])
+try:
+    content = file_path.read_bytes()
+    # procesar...
+finally:
+    file_path.unlink(missing_ok=True)  # SIEMPRE eliminar el temporal
+```
 
-       def create_post(self, post_data: dict):
-           # Lógica de negocio aquí
-           post_id = self.post_model.create(post_data)
-           return self.post_model.find_by_id(post_id)
-   ```
+`uploads/` contiene archivos temporales. Deben eliminarse después de procesar.
 
-8. **Crear rutas** en `app/routes/`:
-   ```python
-   # app/routes/posts.py
-   from fastapi import APIRouter
-   from app.controllers.post_controller import PostController
+### `app/exceptions/`
 
-   router = APIRouter(prefix="/posts", tags=["Posts"])
+**`AppHttpException`** — Excepción personalizada que captura automáticamente archivo/función/línea:
 
-   @router.get("/{post_id}")
-   async def get_post(post_id: int):
-       controller = PostController()
-       return controller.get_post(post_id)
-   ```
+```python
+from app.exceptions import AppHttpException
 
-9. **Registrar router** en `main.py`:
-   ```python
-   from app.routes.posts import router as posts_router
-   app.include_router(posts_router)
-   ```
+raise AppHttpException(
+    message="Usuario no encontrado",
+    status_code=404,
+    context={"user_id": user_id}  # solo visible en development
+)
+```
 
-### Desarrollo de Endpoints (Patrón MVC)
+**Handlers registrados automáticamente** por `create_versioned_app()`:
+- `app_exception_handler` — para `AppHttpException`
+- `validation_exception_handler` — para `RequestValidationError` (errores Pydantic)
+- `rate_limit_handler` — para `RateLimitExceeded` (SlowAPI 429)
+- `generic_exception_handler` — para cualquier `Exception` no controlada
 
-**Flujo recomendado: Routes → Controllers → Models**
+### `app/core/context.py`
 
-1. **Usar logger** para debugging:
-   ```python
-   from app.core.logger import get_logger
-   logger = get_logger(__name__)
+ContextVars disponibles en cualquier parte del código durante el ciclo de vida de la request:
 
-   @router.get("/")
-   async def endpoint():
-       logger.info("Processing request")
-       # ...
-   ```
+```python
+from app.core.context import (
+    current_http_identifier,  # str — Request ID (16 hex chars)
+    current_request_ip,       # str — IP del cliente
+    current_request_method,   # str — GET, POST, etc.
+    current_request_route,    # str — /users/{user_id}
+    current_user_id,          # str | None — para establecer desde auth middleware
+)
+```
 
-2. **Acceder a contexto**:
-   ```python
-   from app.core.context import current_http_identifier, current_request_ip
+## Flujo de Trabajo: Crear Nueva Feature
 
-   request_id = current_http_identifier.get()
-   client_ip = current_request_ip.get()
-   ```
+### 1. Modelo ORM (si necesita tabla nueva)
 
-3. **Usar excepciones personalizadas**:
-   ```python
-   from app.exceptions import AppHttpException
+```python
+# app/models/post.py
+from app.models.base import Base, TimestampMixin
+from sqlalchemy.orm import Mapped, mapped_column
 
-   if not user:
-       raise AppHttpException(
-           message="Usuario no encontrado",
-           status_code=404,
-           context={"username": username}
-       )
-   ```
+class Post(Base, TimestampMixin):
+    __tablename__ = "posts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column()
+    content: Mapped[str | None] = mapped_column(default=None)
+```
 
-4. **Modelo (interacción con BD - SQL directo)**:
-   ```python
-   # app/models/user_model.py
-   from app.core.database import Database
-   from app.core.environments import DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
+Importar en `app/models/__init__.py`:
+```python
+from app.models.post import Post
+__all__ = [..., "Post"]
+```
 
-   class UserModel:
-       def __init__(self):
-           self.db = Database(DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT)
+Generar y aplicar migración:
+```bash
+uv run alembic revision --autogenerate -m "add posts table"
+uv run alembic upgrade head
+```
 
-       def find_by_id(self, user_id: int):
-           return self.db.execute_query(
-               "SELECT * FROM users WHERE id = :id",
-               {"id": user_id},
-               fetchone=True
-           )
+### 2. Modelo de Datos (SQL directo)
 
-       def create(self, user_data: dict):
-           return self.db.execute_query(
-               "INSERT INTO users (...) VALUES (...)",
-               user_data
-           )
-   ```
+```python
+# app/models/post_model.py
+from app.core.database import Database
+from app.core.environments import DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
 
-5. **Controlador (lógica de negocio)**:
-   ```python
-   # app/controllers/user_controller.py
-   from app.models.user_model import UserModel
-   from app.exceptions import AppHttpException
+class PostModel:
+    def __init__(self):
+        self.db = Database(DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT)
 
-   class UserController:
-       def __init__(self):
-           self.user_model = UserModel()
+    def find_by_id(self, post_id: int):
+        return self.db.execute_query(
+            "SELECT * FROM posts WHERE id = :id",
+            {"id": post_id},
+            fetchone=True
+        )
 
-       def get_user(self, user_id: int):
-           user = self.user_model.find_by_id(user_id)
-           if not user:
-               raise AppHttpException("Usuario no encontrado", 404)
-           return user
-   ```
+    def find_all(self, limit: int, offset: int) -> list:
+        return self.db.execute_query(
+            "SELECT * FROM posts LIMIT :limit OFFSET :offset",
+            {"limit": limit, "offset": offset},
+            fetchone=False
+        )
 
-6. **Ruta (endpoint)**:
-   ```python
-   # app/routes/users.py
-   from app.controllers.user_controller import UserController
+    def count(self) -> int:
+        result = self.db.execute_query(
+            "SELECT COUNT(*) as total FROM posts",
+            fetchone=True
+        )
+        return result["total"]
 
-   @router.get("/{user_id}")
-   async def get_user(user_id: int):
-       controller = UserController()
-       return controller.get_user(user_id)
-   ```
+    def create(self, data: dict):
+        return self.db.execute_query(
+            "INSERT INTO posts (title, content) VALUES (:title, :content)",
+            data
+        )
+```
+
+### 3. Controlador
+
+```python
+# app/controllers/post_controller.py
+from app.models.post_model import PostModel
+from app.exceptions import AppHttpException
+
+class PostController:
+    def __init__(self):
+        self.post_model = PostModel()
+
+    def get_post(self, post_id: int):
+        post = self.post_model.find_by_id(post_id)
+        if not post:
+            raise AppHttpException("Post no encontrado", 404, {"post_id": post_id})
+        return post
+```
+
+### 4. Schema Pydantic (opcional pero recomendado)
+
+```python
+# app/schemas/post.py
+from pydantic import BaseModel, Field
+
+class PostCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+    content: str | None = None
+
+class PostOut(BaseModel):
+    id: int
+    title: str
+    content: str | None
+    created_at: str
+
+    model_config = {"from_attributes": True}
+```
+
+### 5. Routes
+
+```python
+# app/routes/v1/posts.py
+from fastapi import APIRouter
+from app.controllers.post_controller import PostController
+from app.schemas.post import PostCreate, PostOut
+from app.utils.response import ApiResponse, success, paginated, empty
+from app.utils.pagination import PaginationDep
+
+router = APIRouter(prefix="/posts", tags=["Posts"])
+
+@router.get("/", response_model=ApiResponse[list[PostOut]])
+async def list_posts(pagination: PaginationDep):
+    controller = PostController()
+    posts = controller.post_model.find_all(pagination.size, pagination.offset)
+    total = controller.post_model.count()
+    return paginated(posts, total=total, pagination=pagination)
+
+@router.get("/{post_id}", response_model=ApiResponse[PostOut])
+async def get_post(post_id: int):
+    return success(data=PostController().get_post(post_id))
+
+@router.post("/", response_model=ApiResponse[PostOut], status_code=201)
+async def create_post(post: PostCreate):
+    created = PostController().create_post(post.model_dump())
+    return success(data=created, message="Post creado exitosamente")
+
+@router.delete("/{post_id}", response_model=ApiResponse[None])
+async def delete_post(post_id: int):
+    PostController().delete_post(post_id)
+    return empty("Post eliminado exitosamente")
+```
+
+### 6. Registrar en Router v1
+
+```python
+# app/routes/v1/__init__.py
+from fastapi import APIRouter
+from app.routes.v1.posts import router as posts_router
+
+router = APIRouter()
+router.include_router(posts_router)
+```
 
 ## Patrones y Convenciones
 
-### Nombres de Archivos
+### Formato de Respuestas
 
-- **Modelos**: `snake_case.py` (ej: `user.py`, `blog_post.py`)
-- **Rutas**: `snake_case.py` (ej: `users.py`, `posts.py`)
-- **Clases**: `PascalCase` (ej: `User`, `BlogPost`, `ContextMiddleware`)
-- **Funciones/variables**: `snake_case` (ej: `get_user`, `user_id`)
+**SIEMPRE** usar `ApiResponse[T]` como `response_model` y los helpers `success()`, `paginated()`, `empty()`.
 
-### Imports
-
-**Orden de imports** (siguiendo PEP 8):
-1. Bibliotecas estándar de Python
-2. Bibliotecas de terceros
-3. Módulos del proyecto
-
-**Ejemplo:**
 ```python
-import os
-from typing import Optional
+# ✅ Correcto
+@router.get("/{id}", response_model=ApiResponse[UserOut])
+async def get_user(id: int):
+    return success(data=controller.get_user(id))
 
-from fastapi import APIRouter, HTTPException
-from sqlalchemy.orm import Session
+# ❌ Incorrecto — rompe el formato estándar
+@router.get("/{id}")
+async def get_user(id: int):
+    return {"id": 1, "name": "John"}
+```
 
+### Errores
+
+**SIEMPRE** usar `AppHttpException` en vez de `HTTPException`:
+
+```python
+# ✅ Correcto
+raise AppHttpException("Usuario no encontrado", 404, {"user_id": user_id})
+
+# ❌ Incorrecto
+from fastapi import HTTPException
+raise HTTPException(status_code=404, detail="Not found")
+```
+
+### Rate Limiting por Ruta
+
+```python
+from fastapi import Request
+from app.core.limiter import limiter
+
+@router.post("/login")
+@limiter.limit("5/minute")
+async def login(request: Request, credentials: LoginSchema):
+    # request: Request es REQUERIDO para que SlowAPI funcione
+    ...
+```
+
+### Seguridad SQL
+
+```python
+# ✅ SIEMPRE usar parámetros
+db.execute_query("SELECT * FROM users WHERE id = :id", {"id": user_id})
+
+# ❌ NUNCA concatenar strings — SQL injection
+db.execute_query(f"SELECT * FROM users WHERE id = {user_id}")
+```
+
+### Logging con Request ID
+
+```python
 from app.core.logger import get_logger
-from app.models import User
+from app.core.context import current_http_identifier
+
+logger = get_logger(__name__)
+
+def some_function():
+    request_id = current_http_identifier.get()
+    logger.info(f"{request_id} | Operación completada")
 ```
 
-### Logging
+### File Upload
 
-- **INFO**: Operaciones normales exitosas
-- **WARNING**: Situaciones inusuales pero manejables
-- **ERROR**: Errores que impiden completar una operación
-- **DEBUG**: Información detallada para debugging (solo desarrollo)
-
-**Contexto en logs:**
 ```python
-logger.info(f"{request_id} | Usuario {user_id} creado exitosamente")
+from fastapi import UploadFile, File
+from pathlib import Path
+from app.utils.file_upload import save_upload
+
+@router.post("/upload")
+async def upload(file: UploadFile = File(...)):
+    file_info = await save_upload(
+        file,
+        allowed_types=["image/jpeg", "image/png"],
+        max_size_mb=2,
+    )
+    file_path = Path(file_info["path"])
+    try:
+        content = file_path.read_bytes()
+        # procesar...
+        return success(data={"processed": True})
+    finally:
+        file_path.unlink(missing_ok=True)  # siempre eliminar
 ```
 
-### Excepciones
+## Nombres de Archivos y Clases
 
-- **Usar `AppHttpException`** para errores controlados
-- **Incluir contexto** relevante para debugging
-- **Status codes apropiados**: 400 (Bad Request), 404 (Not Found), 500 (Internal Server Error)
-
-### Variables de Entorno
-
-- **NUNCA** hardcodear valores sensibles
-- **SIEMPRE** usar `app.core.environments`
-- **Documentar** nuevas variables en `.env.example`
+- **Modelos ORM**: `app/models/post.py` → clase `Post`
+- **Modelos SQL**: `app/models/post_model.py` → clase `PostModel`
+- **Controladores**: `app/controllers/post_controller.py` → clase `PostController`
+- **Routes**: `app/routes/v1/posts.py` → variable `router`
+- **Schemas**: `app/schemas/post.py` → clases `PostCreate`, `PostOut`
+- **Clases**: `PascalCase`
+- **Funciones/variables**: `snake_case`
 
 ## Tecnologías Clave
 
-- **FastAPI**: Framework web con validación automática y documentación
-- **SQLAlchemy 2.0**: ORM con sintaxis moderna (`Mapped[]`, `mapped_column()`)
-- **Alembic**: Migraciones de base de datos automáticas
-- **uv**: Gestor de paquetes ultrarrápido
-- **Ruff**: Linter y formateador extremadamente rápido
-- **Python 3.13+**: Usa features modernas de Python
-
-## Consideraciones Importantes
-
-### Seguridad
-
-1. **Variables de entorno**: Nunca commitear `.env`
-2. **Secretos**: `detect-secrets` previene commits accidentales
-3. **SQL Injection**: Siempre usar parámetros (`:param`) en SQL directo
-4. **Bandit**: Analiza código en busca de vulnerabilidades comunes
-
-### Performance
-
-1. **Pool de conexiones**: Database class ya configurado (10 conexiones, overflow 20)
-2. **Connection recycling**: 180s para evitar conexiones stale
-3. **Pre-ping**: Valida conexiones antes de usar
-
-### Testing
-
-- Carpeta `tests/` no existe aún (puedes crearla)
-- Usar `pytest` como framework de testing
-- Bandit excluye `tests/` de análisis de seguridad
-
-### Logging en Producción
-
-- Establecer `APP_ENV=production` en `.env`
-- Configurar `LOGGER_LEVEL=WARNING` o `ERROR`
-- `LOGGER_EXCEPTIONS_ENABLED=True` para tracking de errores
-- Considerar servicio externo de logs (Sentry, LogRocket, etc.)
+- **FastAPI** con sub-app mounting para API versioning
+- **SQLAlchemy 2.0** — ORM con sintaxis `Mapped[]`, `mapped_column()`
+- **Alembic** — migraciones automáticas
+- **SlowAPI** — rate limiting por IP
+- **Pydantic v2** — validación y serialización
+- **uv** — gestor de paquetes ultrarrápido
+- **Ruff** — linter y formateador
+- **Python 3.13+**
 
 ## Comandos Útiles
 
@@ -440,59 +507,45 @@ uv remove <paquete>
 uv sync
 ```
 
+## Documentación
+
+- `docs/` — documentación completa por feature
+- `readme.md` — instalación y uso general
+- FastAPI genera Swagger en `/api/v1/docs` y ReDoc en `/api/v1/redoc`
+- Documentación deshabilitada si `DOCS_ENABLED=False`
+
 ## Próximos Pasos Comunes
 
-### Autenticación
+### Autenticación JWT
 
-1. Crear modelo `User` con campos de auth
-2. Instalar: `uv add python-jose[cryptography] passlib[bcrypt]`
-3. Crear endpoints `/login`, `/register`
-4. Middleware de autenticación para proteger rutas
-5. Usar `current_user_id.set()` en middleware
+```bash
+uv add python-jose[cryptography] passlib[bcrypt]
+```
+
+1. Agregar campos auth al modelo `User`
+2. Crear endpoints `/auth/login`, `/auth/register`
+3. Crear `AuthMiddleware` que lee JWT y llama `current_user_id.set(user_id)`
+4. Registrar middleware en `create_versioned_app()`
 
 ### Testing
 
-1. Instalar: `uv add pytest pytest-asyncio httpx --group dev`
-2. Crear `tests/conftest.py` con fixtures
-3. Crear `tests/test_*.py` para cada módulo
-4. Configurar GitHub Actions para CI/CD
+```bash
+uv add --group dev pytest pytest-asyncio httpx
+```
 
-### CORS
+Crear `tests/conftest.py` con `TestClient` y fixtures.
+
+### Redis para Rate Limiting Multi-Worker
 
 ```python
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# app/core/limiter.py
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[RATE_LIMIT_DEFAULT],
+    storage_uri="redis://localhost:6379",
 )
 ```
 
-### Documentación API
-
-- FastAPI genera automáticamente: `/docs` (Swagger), `/redoc` (ReDoc)
-- Personalizar en `main.py`:
-  ```python
-  app = FastAPI(
-      title="Mi API",
-      description="Descripción",
-      version="1.0.0"
-  )
-  ```
-
-## Recursos
-
-- **Documentación del proyecto**: `docs/`
-- **README principal**: `readme.md`
-- **Migraciones**: `README_MIGRATIONS.md`
-- **FastAPI Docs**: https://fastapi.tiangolo.com/
-- **SQLAlchemy 2.0**: https://docs.sqlalchemy.org/en/20/
-- **Alembic**: https://alembic.sqlalchemy.org/
-- **Ruff**: https://docs.astral.sh/ruff/
-
 ---
 
-**Nota para Agentes de IA**: Este proyecto sigue patrones establecidos. Mantén la consistencia con la arquitectura existente al agregar nuevas features. Consulta `docs/` para información detallada de cada componente.
+**Nota para Agentes**: Mantén consistencia con la arquitectura existente. Todo endpoint debe usar `ApiResponse[T]`. Todo error controlado debe usar `AppHttpException`. Consulta `docs/` para detalles de cada feature.
