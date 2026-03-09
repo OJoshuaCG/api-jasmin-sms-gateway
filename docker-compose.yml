@@ -1,0 +1,80 @@
+services:
+
+  # ── MariaDB ──────────────────────────────────────────────────────────────────
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:?DB_ROOT_PASS es requerido en .env}
+      MARIADB_DATABASE:      ${DB_NAME:?DB_NAME es requerido en .env}
+      MARIADB_USER:          ${DB_USER:?DB_USER es requerido en .env}
+      MARIADB_PASSWORD:      ${DB_PASS:?DB_PASS es requerido en .env}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--su-mysql", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - backend
+
+  # ── FastAPI ──────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    # Carga variables del archivo .env si existe (no falla si no existe)
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Estas variables se sobrescriben siempre, independiente del .env
+      # para garantizar que la app use los servicios Docker correctos
+      DB_ENGINE: mysql+pymysql
+      DB_HOST: db
+    volumes:
+      - uploads_data:/app/uploads
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+
+  # ── Nginx ─────────────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx_logs:/var/log/nginx
+      # Volúmenes para SSL con Certbot (se configuran cuando se obtienen certificados)
+      - certbot_www:/var/www/certbot:ro
+      - certbot_certs:/etc/letsencrypt:ro
+    depends_on:
+      - api
+    networks:
+      - frontend
+
+volumes:
+  mariadb_data:   # Datos persistentes de MariaDB
+  uploads_data:   # Archivos subidos por la aplicación
+  nginx_logs:     # Logs de acceso/error de Nginx
+  certbot_www:    # Directorio para verificación ACME (Let's Encrypt)
+  certbot_certs:  # Certificados SSL generados por Certbot
+
+networks:
+  backend:   # Red interna: API ↔ MariaDB (no expuesta al exterior)
+    driver: bridge
+  frontend:  # Red de entrada: Nginx ↔ API
+    driver: bridge

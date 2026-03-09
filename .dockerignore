@@ -1,0 +1,39 @@
+# ── Entorno virtual (se reconstruye dentro del contenedor) ───────────────────
+.venv/
+
+# ── Cachés de Python ─────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── Variables de entorno locales ──────────────────────────────────────────────
+# Las variables se inyectan vía docker-compose (env_file / environment)
+# NUNCA incluir .env dentro de la imagen Docker (riesgo de seguridad)
+.env
+.env.*
+
+# ── Herramientas de desarrollo ────────────────────────────────────────────────
+.claude/
+.ruff_cache/
+.pytest_cache/
+.idea/
+.vscode/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Uploads temporales (volumen Docker) ──────────────────────────────────────
+uploads/*
+!uploads/.gitkeep
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbbs.db
