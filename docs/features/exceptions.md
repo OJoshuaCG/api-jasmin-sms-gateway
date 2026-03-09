@@ -109,6 +109,8 @@ raise AppHttpException(
 
 ## Exception Handlers
 
+Todos los handlers se registran automáticamente en `create_versioned_app()`. No se necesita configuración adicional en las rutas.
+
 ### app_exception_handler
 
 Maneja excepciones `AppHttpException`.
@@ -119,13 +121,56 @@ Maneja excepciones `AppHttpException`.
 - **Producción**: Solo retorna `message` y `type`
 - **Logging**: Si `LOGGER_EXCEPTIONS_ENABLED=True`, registra WARNING
 
-**Configuración en main.py:**
+### validation_exception_handler
 
-```python
-from app.exceptions import AppHttpException, app_exception_handler
+Maneja `RequestValidationError` — errores de validación de Pydantic en schemas de entrada.
 
-app.add_exception_handler(AppHttpException, app_exception_handler)
+**Respuesta en producción:**
+
+```json
+HTTP 422 Unprocessable Entity
+{
+  "detail": {
+    "msg": "Error de validación en: email, age",
+    "type": "RequestValidationError"
+  }
+}
 ```
+
+**Respuesta en desarrollo** (incluye detalles por campo):
+
+```json
+{
+  "detail": {
+    "msg": "Error de validación en: email, age",
+    "type": "RequestValidationError",
+    "context": [
+      {"field": "email", "msg": "value is not a valid email address"},
+      {"field": "age", "msg": "Input should be greater than 0"}
+    ]
+  }
+}
+```
+
+El mensaje incluye los nombres de los campos con error para que el cliente sepa exactamente qué corregir.
+
+### rate_limit_handler
+
+Maneja `RateLimitExceeded` de SlowAPI cuando se supera el límite de requests.
+
+**Respuesta:**
+
+```json
+HTTP 429 Too Many Requests
+{
+  "detail": {
+    "msg": "Demasiadas solicitudes. Límite: 100 per 1 minute",
+    "type": "RateLimitExceeded"
+  }
+}
+```
+
+Si `LOGGER_EXCEPTIONS_ENABLED=True`, genera un log WARNING por cada request rechazado.
 
 ### generic_exception_handler
 
@@ -142,14 +187,6 @@ Maneja excepciones no controladas (errores inesperados).
 - **Desarrollo**: Retorna tipo de error, mensaje y ubicación completa
 - **Producción**: Retorna mensaje genérico "Error interno del servidor"
 - **Logging**: Si `LOGGER_EXCEPTIONS_ENABLED=True`, registra ERROR
-
-**Configuración en main.py:**
-
-```python
-from app.exceptions import generic_exception_handler
-
-app.add_exception_handler(Exception, generic_exception_handler)
-```
 
 ## Logging de Excepciones
 

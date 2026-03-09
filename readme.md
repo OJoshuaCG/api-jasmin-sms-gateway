@@ -1,322 +1,404 @@
 # FastAPI Template
 
-> **Plantilla robusta y lista para producción de FastAPI con las mejores prácticas integradas**
+> **Plantilla profesional de FastAPI lista para producción, con arquitectura MVC, versionado de API, seguridad, utilidades y mejores prácticas integradas.**
 
-Esta plantilla proporciona una base sólida para desarrollar aplicaciones FastAPI con todas las herramientas y configuraciones necesarias para un desarrollo profesional.
+## Características
 
-## Características Principales
+| Categoría | Funcionalidad |
+|---|---|
+| **Arquitectura** | Patrón MVC (Routes → Controllers → Models), API versionada por sub-apps |
+| **Respuestas** | Envelope estándar (`ApiResponse[T]`) con helpers `success()`, `paginated()`, `empty()` |
+| **Middlewares** | Context, Logger (configurable), CORS, Rate Limiting, Request Size |
+| **Seguridad** | JWT (`JWTService`), cifrado Fernet (`CryptoService`), gestión de secretos |
+| **Base de Datos** | SQLAlchemy 2.0, SQL directo, Stored Procedures, pool de conexiones |
+| **Migraciones** | Alembic configurado y listo para usar |
+| **Errores** | Handlers globales para `AppHttpException`, `RequestValidationError`, `RateLimitExceeded` |
+| **Paginación** | `PaginationDep` inyectable con `Depends()`, respuesta estandarizada |
+| **File Upload** | `save_upload()` / `save_uploads()` con validación de tipo y tamaño |
+| **Logging** | Logger centralizado con trazabilidad por Request ID |
+| **Configuración** | Variables de entorno centralizadas en `environments.py` |
 
-- **Gestor de Paquetes**: [uv](https://github.com/astral-sh/uv) - Gestor de paquetes ultrarrápido para Python
-- **Logging Avanzado**: Sistema de logging centralizado con middleware de trazabilidad
-- **Context Management**: ContextVars para mantener estado de request (similar a sesiones PHP)
-- **Base de Datos**: Soporte para SQL directo y ORM con SQLAlchemy 2.0
-- **Migraciones**: Alembic configurado y listo para usar
-- **Manejo de Errores**: Sistema robusto de excepciones con tracking automático
-- **Trazabilidad**: Request ID único en cada petición para debugging
-- **Producción Ready**: Configuración para desarrollo y producción
+---
 
 ## Inicio Rápido
 
-### 1. Clonar el Proyecto
+### 1. Clonar y preparar
 
 ```bash
 git clone <tu-repositorio>
 cd fastapi-template
+
+# Si inicias un proyecto nuevo desde esta plantilla:
+rm -rf .git && git init
 ```
 
-### 2. Configurar Entorno
+### 2. Instalar uv (gestor de paquetes)
 
-Copiar y configurar variables de entorno:
+```bash
+# Linux / macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+### 3. Instalar dependencias
+
+```bash
+uv sync
+```
+
+### 4. Configurar entorno
 
 ```bash
 cp .env.example .env
 ```
 
-Editar `.env` con tus valores:
+Editar `.env` con tus valores (ver [Variables de Entorno](#variables-de-entorno)).
 
-```env
-# Aplicación
-APP_ENV=development
-APP_NAME="Mi Proyecto FastAPI"
-SECRET_KEY=tu_clave_secreta_aqui
-
-# Base de Datos
-DB_HOST=localhost
-DB_USER=tu_usuario
-DB_PASS=tu_contraseña
-DB_NAME=nombre_bd
-DB_PORT=3306
-DB_ENGINE=sqlite
-
-# Logging
-LOGGER_LEVEL=INFO
-LOGGER_MIDDLEWARE_ENABLED=True
-LOGGER_MIDDLEWARE_SHOW_HEADERS=False
-LOGGER_EXCEPTIONS_ENABLED=True
-```
-
-### 3. Instalar Dependencias
-
-```bash
-# Instalar uv si no lo tienes
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Instalar dependencias del proyecto
-uv sync
-
-```
-
-### 4. Configurar Base de Datos
-
-```bash
-# Crear base de datos en MySQL/MariaDB
-mysql -u root -p -e "CREATE DATABASE nombre_bd CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
-
-# Aplicar migraciones
-uv run alembic upgrade head
-```
-
-### 5. Ejecutar Aplicación
+### 5. Ejecutar
 
 ```bash
 # Desarrollo con hot-reload
 uv run uvicorn main:app --reload
 
-# Especificar puerto y host
+# Puerto específico
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8080
 ```
 
-La aplicación estará disponible en:
-- **API Docs (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **API Docs (ReDoc)**: [http://localhost:8000/redoc](http://localhost:8000/redoc)
+### 6. Verificar
+
+| URL | Descripción |
+|---|---|
+| `http://localhost:8000/health` | Health check |
+| `http://localhost:8000/api/v1/docs` | Swagger UI v1 |
+| `http://localhost:8000/api/v1/redoc` | ReDoc v1 |
+| `http://localhost:8000/api/v1/test/ping` | Endpoint de prueba |
+
+---
+
+## Variables de Entorno
+
+Todas las variables se documentan en `.env.example`. A continuación el resumen completo:
+
+```env
+# ======= Application =======
+APP_ENV=development          # development | production
+APP_NAME="FastAPI Project"
+SECRET_KEY=tu_clave_secreta  # python -c "import secrets; print(secrets.token_hex(32))"
+
+# ======= Logger =======
+LOGGER_LEVEL=INFO
+LOGGER_MIDDLEWARE_ENABLED=True
+LOGGER_MIDDLEWARE_SHOW_HEADERS=False
+LOGGER_MIDDLEWARE_SHOW_QUERY_PARAMS=True
+LOGGER_MIDDLEWARE_SHOW_BODY=True
+LOGGER_MIDDLEWARE_SHOW_PATH_PARAMS=True   # False = reemplaza URL con template de ruta
+LOGGER_EXCEPTIONS_ENABLED=False
+
+# ======= Docs =======
+DOCS_ENABLED=True            # False = desactiva /docs, /redoc y /openapi.json
+
+# ======= Rate Limiting =======
+RATE_LIMIT_DEFAULT=100/minute  # second | minute | hour | day
+
+# ======= Pagination =======
+PAGINATION_MAX_SIZE=50       # Máximo items/página. Hard cap en código: 200.
+
+# ======= Request Size =======
+REQUEST_MAX_SIZE_MB=10       # Aplica a POST, PUT, PATCH
+
+# ======= CORS =======
+CORS_ORIGINS=*               # Separados por coma. Nota: * + credentials no funciona en browsers.
+
+# ======= Database =======
+DB_HOST=localhost
+DB_USER=username
+DB_PASS=password
+DB_NAME=database
+DB_PORT=3306
+DB_ENGINE=sqlite             # sqlite | mysql+pymysql | postgresql+psycopg2
+```
+
+---
 
 ## Estructura del Proyecto
 
 ```
 fastapi-template/
 ├── app/
-│   ├── core/              # Configuración central
-│   │   ├── context.py     # ContextVars para request state
-│   │   ├── database.py    # Gestión de base de datos
-│   │   ├── environments.py # Variables de entorno
-│   │   └── logger.py      # Sistema de logging
-│   ├── exceptions/        # Excepciones personalizadas
-│   │   ├── AppHttpException.py
-│   │   └── HandlerExceptions.py
-│   ├── middleware/        # Middlewares de aplicación
-│   │   ├── ContextMiddleware.py  # Gestión de contexto
-│   │   └── LoggerMiddleware.py   # Logging de requests
-│   ├── models/            # Modelos SQLAlchemy
-│   │   ├── base.py        # Base y mixins
-│   │   └── user.py        # Modelo de ejemplo
-│   ├── routes/            # Endpoints de la API
-│   └── utils/             # Utilidades
-├── alembic/               # Migraciones de base de datos
-│   ├── versions/          # Archivos de migración
-│   └── env.py             # Configuración de Alembic
-├── docs/                  # Documentación del proyecto
-├── main.py                # Punto de entrada de la aplicación
-├── pyproject.toml         # Configuración de dependencias
-└── .env.example           # Ejemplo de variables de entorno
+│   ├── core/
+│   │   ├── context.py          # ContextVars de request (Request ID, IP, método, etc.)
+│   │   ├── database.py         # Clase Database (SQL directo, ORM, Stored Procedures)
+│   │   ├── environments.py     # Todas las variables de entorno centralizadas
+│   │   ├── limiter.py          # Singleton de slowapi Limiter (rate limiting)
+│   │   ├── logger.py           # get_logger() centralizado
+│   │   └── versioned_app.py    # Factory create_versioned_app() para sub-apps versionadas
+│   ├── controllers/
+│   │   └── user_controller.py  # Ejemplo de controller (CRUD de usuarios)
+│   ├── exceptions/
+│   │   ├── AppHttpException.py     # Excepción HTTP personalizada con tracking
+│   │   ├── HandlerExceptions.py    # Handlers globales (App, Validation, RateLimit, Generic)
+│   │   └── __init__.py
+│   ├── middleware/
+│   │   ├── ContextMiddleware.py    # Genera Request ID, establece ContextVars
+│   │   ├── LoggerMiddleware.py     # Logging de requests/responses
+│   │   └── RequestSizeMiddleware.py # Valida tamaño máximo de body
+│   ├── models/
+│   │   ├── base.py             # DeclarativeBase, TimestampMixin (SQLAlchemy 2.0)
+│   │   ├── user.py             # Modelo ORM de ejemplo (para Alembic)
+│   │   ├── user_model.py       # Modelo de datos SQL directo (para MVC)
+│   │   └── __init__.py         # CRÍTICO: exportar modelos para Alembic
+│   ├── routes/
+│   │   ├── health.py           # GET /health (sin versión, sin rate limiting)
+│   │   └── v1/
+│   │       ├── routes.py       # Agregador de rutas v1
+│   │       └── test.py         # Endpoints de ejemplo y testing
+│   ├── security/
+│   │   ├── crypto.py           # CryptoService (Fernet — cifrado reversible)
+│   │   ├── jwt_service.py      # JWTService (crear y verificar tokens)
+│   │   └── secrets.py          # SecretManager (generar y derivar claves)
+│   └── utils/
+│       ├── dict_utils.py       # _sanitize_dict() (uso interno)
+│       ├── file_upload.py      # save_upload() / save_uploads()
+│       ├── pagination.py       # PaginationParams, PaginationDep
+│       └── response.py         # ApiResponse[T], success(), paginated(), empty()
+├── uploads/                    # Archivos temporales (ignorado por git, excepto .gitkeep)
+├── alembic/                    # Migraciones de base de datos
+├── docs/                       # Documentación detallada
+├── main.py                     # Punto de entrada: monta sub-apps y /health
+├── pyproject.toml
+└── .env.example
 ```
 
-Ver más detalles en [Estructura del Proyecto](docs/project-structure.md).
+---
 
-## Documentación
+## Arquitectura: API Versionada
 
-### Guías de Usuario
+Cada versión de la API es una **sub-aplicación FastAPI independiente** con sus propios middlewares, handlers y documentación.
 
-- [Inicio Rápido](docs/getting-started.md) - Guía completa de instalación y configuración
-- [Estructura del Proyecto](docs/project-structure.md) - Organización de archivos y carpetas
-
-### Características
-
-- [Sistema de Logging](docs/features/logging.md) - Configuración y uso del logger
-- [Context Management](docs/features/context.md) - Sistema de contexto de requests
-- [Base de Datos](docs/features/database.md) - SQL directo y ORM
-- [Migraciones](README_MIGRATIONS.md) - Guía completa de Alembic
-- [Manejo de Excepciones](docs/features/exceptions.md) - Errores personalizados
-- [Middlewares](docs/features/middlewares.md) - Middlewares disponibles
-
-### Desarrollo
-
-- [Mejores Prácticas](docs/development/best-practices.md) - Guía de desarrollo
-- [Despliegue](docs/deployment.md) - Guía de producción
-
-## Migraciones de Base de Datos
-
-Este proyecto utiliza **Alembic** para gestionar las migraciones de base de datos de forma automática y versionada.
-
-### Comandos Rápidos
-
-```bash
-# Crear migración automática (detecta cambios en modelos)
-uv run alembic revision --autogenerate -m "descripción de los cambios"
-
-# Aplicar todas las migraciones pendientes
-uv run alembic upgrade head
-
-# Revertir última migración
-uv run alembic downgrade -1
-
-# Ver estado actual
-uv run alembic current
-
-# Ver historial de migraciones
-uv run alembic history
+```
+main.py
+├── GET /health              ← sin versión, sin rate limiting
+└── /api/v1  ←──────────────── v1_app (create_versioned_app("v1"))
+    ├── GET  /docs           ← Swagger de v1
+    ├── GET  /redoc          ← ReDoc de v1
+    └── /test/...            ← rutas de negocio v1
 ```
 
-### Crear un Nuevo Modelo
-
-1. Crear modelo en `app/models/`:
-   ```python
-   # app/models/post.py
-   from sqlalchemy import String
-   from sqlalchemy.orm import Mapped, mapped_column
-   from app.models.base import Base, TimestampMixin
-
-   class Post(Base, TimestampMixin):
-       __tablename__ = "posts"
-       id: Mapped[int] = mapped_column(primary_key=True)
-       title: Mapped[str] = mapped_column(String(200))
-   ```
-
-2. **Importar en `app/models/__init__.py`** (¡Crítico!):
-   ```python
-   from app.models.post import Post
-   __all__ = [..., "Post"]
-   ```
-
-3. Generar y aplicar migración:
-   ```bash
-   uv run alembic revision --autogenerate -m "add posts table"
-   uv run alembic upgrade head
-   ```
-
-### Documentación Completa
-
-Ver [README_MIGRATIONS.md](README_MIGRATIONS.md) para:
-- Workflow detallado de migraciones
-- Mejores prácticas
-- Troubleshooting
-- Integración con SQL directo
-- Comandos avanzados
-
-## Ejemplos de Uso
-
-### Logging
+### Agregar v2
 
 ```python
-from app.core.logger import get_logger
+# main.py
+from app.routes.v2.routes import router as v2_router
 
-logger = get_logger(__name__)
-
-logger.info("Usuario creado exitosamente")
-logger.warning("Intento de acceso no autorizado")
-logger.error("Error en conexión a base de datos")
+v2_app = create_versioned_app("v2")
+v2_app.include_router(v2_router)
+app.mount("/api/v2", v2_app)
 ```
 
-### Base de Datos - SQL Directo
+Crear `app/routes/v2/routes.py` con los nuevos routers. Las rutas v1 no se afectan.
+
+---
+
+## Patrones de Uso
+
+### Respuestas Estándar
 
 ```python
-from app.core.database import Database
-from app.core.environments import DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
+from app.utils.response import ApiResponse, success, paginated, empty
 
-db = Database(DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT)
+# Respuesta simple
+@router.get("/{id}", response_model=ApiResponse[UserOut])
+async def get_user(id: int):
+    user = controller.get_user(id)
+    return success(data=user)
 
-# SELECT
-users = db.execute_query("SELECT * FROM users WHERE is_active = :active",
-                         {"active": True}, fetchone=False)
+# Con mensaje
+    return success(data=user, message="Usuario creado exitosamente")
 
-# INSERT
-user_id = db.execute_query(
-    "INSERT INTO users (username, email) VALUES (:username, :email)",
-    {"username": "john", "email": "john@example.com"}
-)
+# Paginada
+@router.get("/", response_model=ApiResponse[list[UserOut]])
+async def list_users(pagination: PaginationDep):
+    users = model.find_all(limit=pagination.size, offset=pagination.offset)
+    total = model.count()
+    return paginated(users, total=total, pagination=pagination)
+
+# Sin contenido (DELETE)
+@router.delete("/{id}", response_model=ApiResponse[None])
+async def delete_user(id: int):
+    controller.delete_user(id)
+    return empty("Usuario eliminado exitosamente")
 ```
 
-### Base de Datos - ORM
+**Formato de respuesta exitosa:**
+```json
+{"data": {"id": 1, "name": "John"}}
+{"data": [...], "pagination": {"page": 1, "size": 20, "total": 150, "pages": 8, "has_next": true, "has_prev": false}}
+{"message": "Usuario eliminado exitosamente"}
+```
+
+**Formato de error** (independiente del envelope):
+```json
+{"detail": {"msg": "Usuario no encontrado", "type": "AppHttpException"}}
+{"detail": {"msg": "Error de validación en: email, age", "type": "RequestValidationError"}}
+{"detail": {"msg": "Demasiadas solicitudes. Límite: 100 per 1 minute", "type": "RateLimitExceeded"}}
+```
+
+### Paginación
 
 ```python
-from app.models import User
-from app.core.database import Database
+from app.utils.pagination import PaginationDep
+from app.utils.response import ApiResponse, paginated
 
-db = Database(DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT)
-session = db.get_declarative_base_session()
-
-try:
-    # Consultar
-    user = session.query(User).filter(User.username == "john").first()
-
-    # Crear
-    new_user = User(username="jane", email="jane@example.com", hashed_password="...")
-    session.add(new_user)
-    session.commit()
-finally:
-    session.close()
+@router.get("/users", response_model=ApiResponse[list[dict]])
+async def list_users(pagination: PaginationDep):
+    # pagination.page   → número de página (desde 1)
+    # pagination.size   → items por página
+    # pagination.offset → listo para SQL: LIMIT size OFFSET offset
+    users = model.find_all(limit=pagination.size, offset=pagination.offset)
+    total = model.count()
+    return paginated(users, total=total, pagination=pagination)
 ```
 
-### Context Management
+Query params: `GET /users?page=2&size=10`
+
+### File Upload
 
 ```python
-from app.core.context import current_http_identifier, current_request_ip, current_user_id
+from fastapi import File, UploadFile
+from pathlib import Path
+from app.utils.file_upload import save_upload, save_uploads
+from app.utils.response import ApiResponse, success
 
-# Obtener Request ID único
-request_id = current_http_identifier.get()
-
-# Obtener IP del cliente
-client_ip = current_request_ip.get()
-
-# Establecer usuario actual (en middleware de auth)
-current_user_id.set(user.id)
+@router.post("/avatar", response_model=ApiResponse[dict])
+async def upload_avatar(file: UploadFile = File(...)):
+    file_info = await save_upload(
+        file,
+        allowed_types=["image/jpeg", "image/png", "image/webp"],
+        max_size_mb=2,
+    )
+    file_path = Path(file_info["path"])
+    try:
+        content = file_path.read_bytes()
+        # Subir a S3, procesar imagen, etc.
+        return success(data={"url": "..."}, message="Avatar actualizado")
+    finally:
+        if file_path.exists():
+            file_path.unlink()  # Siempre eliminar el temporal
 ```
 
-### Excepciones Personalizadas
+### Excepciones
 
 ```python
 from app.exceptions import AppHttpException
 
-# Lanzar excepción con contexto
 raise AppHttpException(
     message="Usuario no encontrado",
     status_code=404,
-    context={"user_id": user_id}
+    context={"user_id": user_id}  # Solo visible en APP_ENV=development
 )
 ```
 
-## Tecnologías
+### Rate Limiting por Ruta
 
-- **[FastAPI](https://fastapi.tiangolo.com/)** - Framework web moderno y rápido
-- **[uv](https://github.com/astral-sh/uv)** - Gestor de paquetes Python ultrarrápido
-- **[SQLAlchemy 2.0](https://docs.sqlalchemy.org/)** - ORM y SQL toolkit
-- **[Alembic](https://alembic.sqlalchemy.org/)** - Migraciones de base de datos
-- **[Pydantic](https://docs.pydantic.dev/)** - Validación de datos
-- **[Ruff](https://docs.astral.sh/ruff/)** - Linter y formateador extremadamente rápido
-- **[Bandit](https://bandit.readthedocs.io/)** - Herramienta de seguridad para Python
-## Requisitos
+```python
+from fastapi import Request
+from app.core.limiter import limiter
 
-- Python 3.13+
-- MySQL/MariaDB 5.7+ (opcional, configurable para PostgreSQL o SQLite)
-- uv (gestor de paquetes)
+@router.post("/login")
+@limiter.limit("5/minute")          # Límite específico para este endpoint
+async def login(request: Request):  # request es requerido por slowapi
+    ...
+```
 
-## Contribuir
+### Context (Request ID, IP, etc.)
 
-1. Fork el proyecto
-2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
+```python
+from app.core.context import current_http_identifier, current_request_ip
 
-## Soporte
-
-- **Documentación**: Ver carpeta `docs/`
-- **Issues**: Reportar problemas en GitHub Issues
-- **Discusiones**: GitHub Discussions
-
-## Licencia
-
-Este proyecto es una plantilla de código abierto. Úsala libremente para tus proyectos.
+request_id = current_http_identifier.get()
+client_ip  = current_request_ip.get()
+```
 
 ---
 
-**Desarrollado con FastAPI + uv** | [Documentación Completa](docs/getting-started.md)
+## Flujo de una Request
+
+```
+Cliente
+  ↓
+RequestSizeMiddleware  → rechaza si body > REQUEST_MAX_SIZE_MB (POST/PUT/PATCH)
+  ↓
+CORSMiddleware         → agrega headers CORS, maneja preflight OPTIONS
+  ↓
+ContextMiddleware      → genera Request ID, establece ContextVars
+  ↓
+LoggerMiddleware       → inicia timer, loguea request
+  ↓
+SlowAPIMiddleware      → verifica rate limit por IP
+  ↓
+ExceptionMiddleware    → captura excepciones → handlers → JSONResponse
+  ↓
+Endpoint               → Controller → Model → Database
+  ↓
+(respuesta sube por el mismo stack en orden inverso)
+  ↓
+LoggerMiddleware       → loguea response (status, duración)
+  ↓
+ContextMiddleware      → inyecta X-Request-ID en headers, limpia contexto
+  ↓
+Cliente recibe respuesta con header X-Request-ID
+```
+
+---
+
+## Comandos de Referencia
+
+```bash
+# Desarrollo
+uv run uvicorn main:app --reload
+uv run uvicorn main:app --reload --host 0.0.0.0 --port 8080
+
+# Dependencias
+uv add <paquete>
+uv add --group dev <paquete>
+uv remove <paquete>
+uv sync
+
+# Migraciones
+uv run alembic revision --autogenerate -m "descripción"
+uv run alembic upgrade head
+uv run alembic downgrade -1
+uv run alembic current
+uv run alembic history
+```
+
+---
+
+## Documentación
+
+- [Inicio Rápido](docs/getting-started.md)
+- [Estructura del Proyecto](docs/project-structure.md)
+- [API Versionada](docs/features/api-versioning.md)
+- [Respuestas Estándar](docs/features/response-format.md)
+- [Paginación](docs/features/pagination.md)
+- [File Upload](docs/features/file-upload.md)
+- [Rate Limiting](docs/features/rate-limiting.md)
+- [CORS](docs/features/cors.md)
+- [Middlewares](docs/features/middlewares.md)
+- [Sistema de Logging](docs/features/logging.md)
+- [Manejo de Excepciones](docs/features/exceptions.md)
+- [Base de Datos](docs/features/database.md)
+- [Migraciones](README_MIGRATIONS.md)
+
+## Tecnologías
+
+- **[FastAPI](https://fastapi.tiangolo.com/)** — Framework web moderno y rápido
+- **[SQLAlchemy 2.0](https://docs.sqlalchemy.org/)** — ORM y SQL toolkit
+- **[Alembic](https://alembic.sqlalchemy.org/)** — Migraciones de base de datos
+- **[Pydantic v2](https://docs.pydantic.dev/)** — Validación de datos y schemas
+- **[slowapi](https://github.com/laurentS/slowapi)** — Rate limiting para Starlette/FastAPI
+- **[uv](https://github.com/astral-sh/uv)** — Gestor de paquetes ultrarrápido
+- **[Ruff](https://docs.astral.sh/ruff/)** — Linter y formateador extremadamente rápido
+- **Python 3.13+**

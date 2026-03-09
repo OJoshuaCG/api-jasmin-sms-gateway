@@ -26,9 +26,28 @@ LOGGER_MIDDLEWARE_ENABLED=True
 # Mostrar headers en logs (útil para debugging, desactivar en producción)
 LOGGER_MIDDLEWARE_SHOW_HEADERS=False
 
+# Mostrar query params en logs (?page=1&size=10)
+LOGGER_MIDDLEWARE_SHOW_QUERY_PARAMS=True
+
+# Mostrar body del request en logs
+LOGGER_MIDDLEWARE_SHOW_BODY=True
+
+# True = loggea path real (/users/42). False = loggea template (/users/{user_id})
+LOGGER_MIDDLEWARE_SHOW_PATH_PARAMS=True
+
 # Habilitar logging de excepciones
 LOGGER_EXCEPTIONS_ENABLED=True
 ```
+
+| Variable | Default | Descripción |
+|---|---|---|
+| `LOGGER_LEVEL` | `INFO` | Nivel mínimo de logs |
+| `LOGGER_MIDDLEWARE_ENABLED` | `True` | Activar/desactivar el middleware |
+| `LOGGER_MIDDLEWARE_SHOW_HEADERS` | `False` | Incluir headers en logs |
+| `LOGGER_MIDDLEWARE_SHOW_QUERY_PARAMS` | `True` | Mostrar query params |
+| `LOGGER_MIDDLEWARE_SHOW_BODY` | `True` | Mostrar body del request |
+| `LOGGER_MIDDLEWARE_SHOW_PATH_PARAMS` | `True` | `False` = usar template de ruta |
+| `LOGGER_EXCEPTIONS_ENABLED` | `True` | Loggear excepciones |
 
 ### Niveles de Logging
 

@@ -133,7 +133,9 @@ class UserModel:
 
 ## Validación de Datos
 
-### Usar Pydantic Models
+### Usar Pydantic Models con ApiResponse
+
+Siempre usa `ApiResponse[T]` como `response_model` para consistencia:
 
 ```python
 # app/schemas/user.py
@@ -145,23 +147,26 @@ class UserCreate(BaseModel):
     password: str = Field(..., min_length=8)
     full_name: str | None = None
 
-class UserResponse(BaseModel):
+class UserOut(BaseModel):
     id: int
     username: str
     email: str
     is_active: bool
 
-    class Config:
-        from_attributes = True  # Para ORM models
+    model_config = {"from_attributes": True}
 
 # app/routes/users.py
-@router.post("/", response_model=UserResponse)
+from app.utils.response import ApiResponse, success, empty
+
+@router.post("/", response_model=ApiResponse[UserOut], status_code=201)
 async def create_user(user: UserCreate):
-    # user ya está validado por Pydantic
-    # password tiene min 8 caracteres
-    # email es válido
-    # username tiene 3-50 caracteres
-    pass
+    result = controller.create_user(user.model_dump())
+    return success(data=result, message="Usuario creado")
+
+@router.delete("/{user_id}", response_model=ApiResponse[None])
+async def delete_user(user_id: int):
+    controller.delete_user(user_id)
+    return empty("Usuario eliminado exitosamente")
 ```
 
 ### Validación Personalizada
@@ -389,23 +394,20 @@ posts = db.execute_query("""
 
 ### Paginación
 
+Usa `PaginationDep` y `paginated()` para respuestas consistentes:
+
 ```python
-@router.get("/users")
-async def list_users(page: int = 1, per_page: int = 20):
-    offset = (page - 1) * per_page
+from app.utils.pagination import PaginationDep
+from app.utils.response import ApiResponse, paginated
 
-    users = db.execute_query(
-        "SELECT * FROM users LIMIT :limit OFFSET :offset",
-        {"limit": per_page, "offset": offset},
-        fetchone=False
-    )
-
-    return {
-        "data": users,
-        "page": page,
-        "per_page": per_page
-    }
+@router.get("/users", response_model=ApiResponse[list[UserOut]])
+async def list_users(pagination: PaginationDep):
+    users = model.find_all(limit=pagination.size, offset=pagination.offset)
+    total = model.count()
+    return paginated(users, total=total, pagination=pagination)
 ```
+
+Ver [Paginación](../features/pagination.md) para documentación completa.
 
 ### Caché
 
