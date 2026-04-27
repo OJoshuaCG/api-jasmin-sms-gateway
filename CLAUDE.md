@@ -107,7 +107,9 @@ DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
 CORS_ORIGINS   # Orígenes separados por coma. "*" para todos
 
 # Rate Limiting
-RATE_LIMIT_DEFAULT  # "100/minute", "10/second", "1000/hour"
+RATE_LIMIT_DEFAULT        # "100/minute", "10/second", "1000/hour"
+RATE_LIMIT_REDIS_ENABLED  # True/False — False = memoria del proceso, True = Redis
+RATE_LIMIT_REDIS_URL      # URI de Redis (solo si RATE_LIMIT_REDIS_ENABLED=True)
 
 # Pagination
 PAGINATION_MAX_SIZE  # Default 50, hard cap en código: 200

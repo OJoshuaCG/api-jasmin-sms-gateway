@@ -1,15 +1,10 @@
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from app.core.environments import RATE_LIMIT_DEFAULT
+from app.core.environments import RATE_LIMIT_DEFAULT, RATE_LIMIT_REDIS_ENABLED, RATE_LIMIT_REDIS_URL
 
-# Instancia compartida entre todas las versiones de la API.
-# key_func=get_remote_address → el límite se aplica por IP del cliente.
-# default_limits aplica globalmente a todas las rutas sin necesidad de decorador.
-# Para un límite específico por ruta usa el decorador:
-#   @limiter.limit("10/minute")
-#   async def my_endpoint(request: Request): ...
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[RATE_LIMIT_DEFAULT],
+    storage_uri=RATE_LIMIT_REDIS_URL if RATE_LIMIT_REDIS_ENABLED else "memory://",
 )

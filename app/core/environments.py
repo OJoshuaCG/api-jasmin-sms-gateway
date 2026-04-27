@@ -43,6 +43,8 @@ DOCS_PASSWORD = os.getenv("DOCS_PASSWORD", "")
 
 # ======= Rate limiting variables ======= #
 RATE_LIMIT_DEFAULT = os.getenv("RATE_LIMIT_DEFAULT", "100/minute")
+RATE_LIMIT_REDIS_ENABLED = os.getenv("RATE_LIMIT_REDIS_ENABLED", "False").lower() == "true"
+RATE_LIMIT_REDIS_URL = os.getenv("RATE_LIMIT_REDIS_URL", "redis://localhost:6379")
 
 # ======= Pagination variables ======= #
 # Máximo de elementos por página. Hardcap en código: 200.
