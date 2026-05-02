@@ -1,19 +1,31 @@
 from fastapi import APIRouter
 
 from app.core.environments import APP_ENV, APP_NAME
+from app.controllers.system_controller import SystemController
 
-router = APIRouter(tags=["health"])
+router = APIRouter(tags=["Health"])
 
 
 @router.get("/health")
 async def health():
     """
-    Endpoint de salud de la aplicación.
-    No está versionado ni tiene rate limiting.
-    Útil para health checks de Docker, Kubernetes, load balancers, etc.
+    Service health — no auth required.
+    Returns Jasmin Telnet + HTTP API status alongside the app status.
     """
-    return {
-        "status": "ok",
-        "service": APP_NAME,
-        "environment": APP_ENV,
-    }
+    try:
+        health_data = await SystemController().health()
+        return {
+            "status": health_data.status,
+            "service": APP_NAME,
+            "environment": APP_ENV,
+            "telnet": health_data.telnet.model_dump(),
+            "jasmin_http": health_data.jasmin_http.model_dump(),
+        }
+    except Exception:
+        return {
+            "status": "error",
+            "service": APP_NAME,
+            "environment": APP_ENV,
+            "telnet": {"connected": False},
+            "jasmin_http": {"reachable": False},
+        }
