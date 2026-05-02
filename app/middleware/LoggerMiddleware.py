@@ -16,6 +16,7 @@ from app.core.logger import get_logger
 logger = get_logger()
 
 _SENSITIVE_PATHS = {"/user/login"}
+_REDACTED_HEADERS = {"x-api-key", "authorization", "cookie", "set-cookie"}
 
 
 class LoggerMiddleware(BaseHTTPMiddleware):
@@ -26,7 +27,10 @@ class LoggerMiddleware(BaseHTTPMiddleware):
         method = request.method
         path = request.url.path
         query_string = request.url.query or None
-        headers = dict(request.headers)
+        headers = {
+            k: ("***" if k.lower() in _REDACTED_HEADERS else v)
+            for k, v in request.headers.items()
+        }
         client_ip = request.client.host if request.client else "unknown"
 
         try:
