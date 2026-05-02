@@ -71,6 +71,21 @@ DB_NAME = os.getenv("DB_NAME", "database")
 DB_PORT = int(os.getenv("DB_PORT", "3306"))
 DB_ENGINE = os.getenv("DB_ENGINE", "sqlite")
 
+# ======= Jasmin Telnet variables ======= #
+JASMIN_TELNET_HOST = os.getenv("JASMIN_TELNET_HOST", "localhost")
+JASMIN_TELNET_PORT = int(os.getenv("JASMIN_TELNET_PORT", "8990"))
+JASMIN_TELNET_USER = os.getenv("JASMIN_TELNET_USER", "jcliadmin")
+JASMIN_TELNET_PASSWORD = os.getenv("JASMIN_TELNET_PASSWORD", "jclipwd")
+JASMIN_TELNET_TIMEOUT = int(os.getenv("JASMIN_TELNET_TIMEOUT", "10"))
+
+# ======= Jasmin HTTP API variables ======= #
+JASMIN_HTTP_HOST = os.getenv("JASMIN_HTTP_HOST", "localhost")
+JASMIN_HTTP_PORT = int(os.getenv("JASMIN_HTTP_PORT", "1401"))
+
+# ======= Admin API variables ======= #
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+JASMIN_SCRIPTS_DIR = os.getenv("JASMIN_SCRIPTS_DIR", "/etc/jasmin/scripts")
+
 # ======= Startup validation ======= #
 if not SECRET_KEY:
     if APP_ENV == "production":
@@ -81,4 +96,17 @@ if not SECRET_KEY:
     import logging as _logging
     _logging.warning(
         "SECRET_KEY no está definido. Define SECRET_KEY en tu .env para evitar este aviso."
+    )
+
+if not ADMIN_API_KEY:
+    if APP_ENV == "production":
+        raise ValueError(
+            "ADMIN_API_KEY no está definido. "
+            'Genera una clave con: python -c "import secrets; print(secrets.token_urlsafe(32))" '
+            "y establécela como variable de entorno ADMIN_API_KEY."
+        )
+    import logging as _logging
+    _logging.warning(
+        "ADMIN_API_KEY no está definido. Todos los endpoints de la API devolverán 500. "
+        "Define ADMIN_API_KEY en tu .env."
     )
