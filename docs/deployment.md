@@ -1,665 +1,413 @@
-# Guía de Despliegue
+# Guía de Despliegue — Jasmin API Gateway
 
-Esta guía cubre cómo desplegar la aplicación FastAPI en diferentes entornos de producción.
+Esta guía cubre cómo instalar y configurar el API Gateway sobre un servidor que ya tiene Jasmin SMS Gateway funcionando, ya sea instalado de forma nativa o en Docker.
 
-## Preparación para Producción
+---
 
-### 1. Variables de Entorno
+## Requisitos previos
 
-Crear `.env` para producción:
+- Python 3.13+
+- `uv` (gestor de paquetes)
+- Jasmin SMS Gateway corriendo (nativo o Docker)
+- Puerto 8990 (jcli Telnet) accesible desde el gateway
+- Puerto 1401 (HTTP API de Jasmin) accesible desde el gateway
+
+### Instalar `uv`
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env  # o reinicia la sesión
+```
+
+---
+
+## Escenario A: Jasmin nativo en el mismo servidor
+
+En este caso Jasmin está instalado directamente en el servidor (no Docker). El gateway se instala como servicio systemd en el mismo host.
+
+### 1. Clonar y configurar
+
+```bash
+# Crear usuario dedicado (opcional pero recomendado)
+sudo useradd -m -s /bin/bash jasmin-gw
+sudo -u jasmin-gw bash
+
+# Clonar el repositorio
+cd /home/jasmin-gw
+git clone <repo-url> api-gateway
+cd api-gateway
+
+# Instalar dependencias
+uv sync --no-dev
+```
+
+### 2. Crear el archivo `.env`
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Valores mínimos para producción:
 
 ```env
-# Aplicación
 APP_ENV=production
-APP_NAME="Mi API"
-SECRET_KEY=<generar_clave_secreta_fuerte>
+APP_NAME="Jasmin API Gateway"
+SECRET_KEY=<genera con: python -c "import secrets; print(secrets.token_hex(32))">
+ADMIN_API_KEY=<genera con: python -c "import secrets; print(secrets.token_urlsafe(32))">
 
-# Base de Datos
-DB_HOST=db.production.example.com
-DB_USER=api_user
-DB_PASS=<contraseña_segura>
-DB_NAME=api_production
-DB_PORT=3306
+# Jasmin — mismo servidor, localhost siempre
+JASMIN_TELNET_HOST=localhost
+JASMIN_TELNET_PORT=8990
+JASMIN_TELNET_USER=jcliadmin
+JASMIN_TELNET_PASSWORD=<contraseña del jcli de Jasmin>
+JASMIN_TELNET_TIMEOUT=10
 
-# Logging
+JASMIN_HTTP_HOST=localhost
+JASMIN_HTTP_PORT=1401
+
+# Logging — solo errores en producción
 LOGGER_LEVEL=WARNING
 LOGGER_MIDDLEWARE_ENABLED=True
+LOGGER_MIDDLEWARE_ERRORS_ONLY=True
 LOGGER_MIDDLEWARE_SHOW_HEADERS=False
-LOGGER_EXCEPTIONS_ENABLED=True
+LOGGER_MIDDLEWARE_SHOW_BODY=False
+
+# Documentación — desactivar o proteger en producción
+DOCS_ENABLED=False
+
+# Rate limiting
+RATE_LIMIT_DEFAULT=60/minute
+
+# Directorio de scripts de interceptores
+JASMIN_SCRIPTS_DIR=/etc/jasmin/scripts
 ```
 
-**Generar SECRET_KEY segura:**
+### 3. Verificar conexión con Jasmin
+
+Antes de instalar el servicio, verifica que el gateway puede conectarse:
 
 ```bash
-python -c "import secrets; print(secrets.token_hex(32))"
+# Verificar puerto Telnet de Jasmin
+telnet localhost 8990
+
+# Verificar puerto HTTP de Jasmin
+curl -s "http://localhost:1401/send?username=test&password=test&to=1234&content=test"
+# Esperado: error de autenticación, no "connection refused"
 ```
 
-### 2. Dependencias de Producción
+### 4. Crear servicio systemd
 
-```bash
-# Sincronizar dependencias
-uv sync --no-dev
-
-# O instalar solo dependencias de producción
-uv sync --frozen
-```
-
-### 3. Migraciones
-
-```bash
-# Aplicar todas las migraciones
-uv run alembic upgrade head
-
-# Verificar estado
-uv run alembic current
-```
-
-### 4. Configuración de Uvicorn
-
-**Archivo de configuración** (`gunicorn_conf.py`):
-
-```python
-import multiprocessing
-import os
-
-# Bind
-bind = f"0.0.0.0:{os.getenv('PORT', '8000')}"
-
-# Workers
-workers = int(os.getenv('WEB_CONCURRENCY', multiprocessing.cpu_count() * 2 + 1))
-worker_class = "uvicorn.workers.UvicornWorker"
-
-# Logging
-accesslog = "-"
-errorlog = "-"
-loglevel = os.getenv('LOG_LEVEL', 'info')
-
-# Timeouts
-timeout = 120
-keepalive = 5
-
-# Restart workers after N requests (previene memory leaks)
-max_requests = 1000
-max_requests_jitter = 50
-```
-
-## Opciones de Despliegue
-
-### Opción 1: Docker (Recomendado)
-
-#### Dockerfile
-
-```dockerfile
-# Dockerfile
-FROM python:3.13-slim
-
-WORKDIR /app
-
-# Instalar uv
-RUN pip install uv
-
-# Copiar archivos de dependencias
-COPY pyproject.toml uv.lock ./
-
-# Instalar dependencias
-RUN uv sync --no-dev --frozen
-
-# Copiar código de aplicación
-COPY . .
-
-# Exponer puerto
-EXPOSE 8000
-
-# Comando de inicio
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
-```
-
-#### docker-compose.yml
-
-```yaml
-version: '3.8'
-
-services:
-  api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - APP_ENV=production
-      - DB_HOST=db
-      - DB_USER=api_user
-      - DB_PASS=secure_password
-      - DB_NAME=api_db
-    depends_on:
-      - db
-    restart: unless-stopped
-
-  db:
-    image: mariadb:11
-    environment:
-      - MYSQL_ROOT_PASSWORD=root_password
-      - MYSQL_DATABASE=api_db
-      - MYSQL_USER=api_user
-      - MYSQL_PASSWORD=secure_password
-    volumes:
-      - db_data:/var/lib/mysql
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./certs:/etc/nginx/certs
-    depends_on:
-      - api
-    restart: unless-stopped
-
-volumes:
-  db_data:
-```
-
-#### Construir y Ejecutar
-
-```bash
-# Construir imagen
-docker build -t mi-api .
-
-# Ejecutar contenedor
-docker run -d \
-  -p 8000:8000 \
-  --env-file .env.production \
-  --name mi-api \
-  mi-api
-
-# Con docker-compose
-docker-compose up -d
-
-# Ver logs
-docker-compose logs -f api
-
-# Ejecutar migraciones
-docker-compose exec api uv run alembic upgrade head
-```
-
-### Opción 2: Servidor Linux (VPS)
-
-#### 1. Instalar Dependencias
-
-```bash
-# Actualizar sistema
-sudo apt update && sudo apt upgrade -y
-
-# Instalar Python 3.13
-sudo apt install python3.13 python3.13-venv -y
-
-# Instalar uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Instalar nginx
-sudo apt install nginx -y
-
-# Instalar MySQL/MariaDB
-sudo apt install mariadb-server -y
-```
-
-#### 2. Configurar Aplicación
-
-```bash
-# Crear usuario
-sudo useradd -m -s /bin/bash api
-
-# Clonar repositorio
-sudo -u api git clone <repo-url> /home/api/app
-cd /home/api/app
-
-# Instalar dependencias
-sudo -u api uv sync --no-dev
-
-# Configurar .env
-sudo -u api nano .env
-```
-
-#### 3. Systemd Service
-
-Crear `/etc/systemd/system/api.service`:
+Crear `/etc/systemd/system/jasmin-api-gateway.service`:
 
 ```ini
 [Unit]
-Description=FastAPI Application
-After=network.target
+Description=Jasmin API Gateway
+After=network.target jasmin.service
+Wants=jasmin.service
 
 [Service]
-Type=notify
-User=api
-Group=api
-WorkingDirectory=/home/api/app
-Environment="PATH=/home/api/.local/bin:/usr/local/bin:/usr/bin"
-ExecStart=/home/api/.local/bin/uv run gunicorn main:app -c gunicorn_conf.py
+Type=simple
+User=jasmin-gw
+Group=jasmin-gw
+WorkingDirectory=/home/jasmin-gw/api-gateway
+EnvironmentFile=/home/jasmin-gw/api-gateway/.env
+ExecStart=/home/jasmin-gw/.local/bin/uv run uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
+Restart=always
+RestartSec=5
+
+# Seguridad
+NoNewPrivileges=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Habilitar y ejecutar:
+> **Nota:** `--host 127.0.0.1` — escucha solo en loopback. Nginx expone el puerto al exterior.
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable api
-sudo systemctl start api
-sudo systemctl status api
+sudo systemctl enable jasmin-api-gateway
+sudo systemctl start jasmin-api-gateway
+sudo systemctl status jasmin-api-gateway
 ```
 
-#### 4. Nginx Reverse Proxy
+### 5. Nginx como reverse proxy
 
-Crear `/etc/nginx/sites-available/api`:
+```bash
+sudo apt install nginx -y
+```
+
+Crear `/etc/nginx/sites-available/jasmin-api-gateway`:
 
 ```nginx
-upstream api_backend {
-    server 127.0.0.1:8000;
-}
-
 server {
     listen 80;
-    server_name api.example.com;
-
-    # Redirigir a HTTPS
+    server_name api.tudominio.com;
     return 301 https://$server_name$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name api.example.com;
+    server_name api.tudominio.com;
 
-    # SSL
-    ssl_certificate /etc/letsencrypt/live/api.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/api.tudominio.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.tudominio.com/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
 
-    # Configuración SSL
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
+    # No exponer versión de nginx
+    server_tokens off;
 
     # Headers de seguridad
-    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Frame-Options "DENY" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
 
-    # Proxy a API
     location / {
-        proxy_pass http://api_backend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Timeouts
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
         proxy_read_timeout 60s;
+        client_max_body_size 2M;
     }
-
-    # Limitar tamaño de uploads
-    client_max_body_size 10M;
 }
 ```
 
-Habilitar sitio:
-
 ```bash
-sudo ln -s /etc/nginx/sites-available/api /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/jasmin-api-gateway /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
-```
 
-#### 5. SSL con Let's Encrypt
-
-```bash
+# SSL con Let's Encrypt
 sudo apt install certbot python3-certbot-nginx -y
-sudo certbot --nginx -d api.example.com
-sudo certbot renew --dry-run
+sudo certbot --nginx -d api.tudominio.com
 ```
 
-### Opción 3: Plataformas Cloud
-
-#### Heroku
-
-**Procfile:**
-
-```
-web: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 4
-release: alembic upgrade head
-```
-
-**Despliegue:**
+### 6. Verificar instalación
 
 ```bash
-heroku create mi-api
-heroku addons:create jawsdb:kitefin
-git push heroku main
+# Health check (sin API key)
+curl https://api.tudominio.com/health
+
+# Listar grupos (con API key)
+curl -H "X-API-Key: <tu-api-key>" https://api.tudominio.com/api/v1/groups/
+
+# Ver logs
+sudo journalctl -u jasmin-api-gateway -f
 ```
 
-#### Railway
+---
 
-1. Conectar repositorio de GitHub
-2. Agregar variables de entorno
-3. Railway detecta automáticamente FastAPI
+## Escenario B: Jasmin en Docker
 
-#### Render
+En este caso Jasmin corre en Docker. El gateway se agrega al mismo `docker-compose.yml` como servicio adicional (sidecar).
 
-1. Crear nuevo Web Service
-2. Build Command: `uv sync`
-3. Start Command: `uv run uvicorn main:app --host 0.0.0.0 --port $PORT --workers 4`
+### Opción B1: Agregar el gateway al docker-compose de Jasmin
 
-#### AWS (EC2)
+Si ya tienes un `docker-compose.yml` con Jasmin, agrega el servicio del gateway:
 
-Similar a VPS Linux, seguir pasos de "Opción 2".
+```yaml
+version: '3.8'
 
-#### Google Cloud Run
+services:
+  # ── Servicios existentes de Jasmin ──────────────────────────────
+  jasmin:
+    image: jookies/jasmin:latest
+    ports:
+      - "1401:1401"   # HTTP API (exponer si clientes externos lo necesitan)
+      # NO exponer 8990 (jcli) al exterior
+    volumes:
+      - jasmin_config:/etc/jasmin
+      - jasmin_logs:/var/log/jasmin
+    restart: unless-stopped
 
-**Dockerfile optimizado:**
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  rabbit:
+    image: rabbitmq:3-management-alpine
+    restart: unless-stopped
+
+  # ── API Gateway (nuevo) ─────────────────────────────────────────
+  jasmin-api-gateway:
+    build:
+      context: ./jasmin-api-gateway   # ruta al repo del gateway
+      dockerfile: Dockerfile
+    env_file: ./jasmin-api-gateway/.env.production
+    environment:
+      # Apunta al servicio "jasmin" dentro de la red Docker
+      JASMIN_TELNET_HOST: jasmin
+      JASMIN_TELNET_PORT: "8990"
+      JASMIN_HTTP_HOST: jasmin
+      JASMIN_HTTP_PORT: "1401"
+    ports:
+      - "127.0.0.1:8000:8000"   # Solo loopback — Nginx lo expone
+    depends_on:
+      - jasmin
+    restart: unless-stopped
+    volumes:
+      - jasmin_config:/etc/jasmin   # compartir directorio de scripts
+
+volumes:
+  jasmin_config:
+  jasmin_logs:
+```
+
+### Dockerfile del gateway
+
+Crea `Dockerfile` en la raíz del repositorio del gateway:
 
 ```dockerfile
 FROM python:3.13-slim
 
 WORKDIR /app
+
+RUN pip install uv
+
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --no-dev --frozen
+
 COPY . .
-RUN pip install uv && uv sync --no-dev
 
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "$PORT"]
+EXPOSE 8000
+
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
 ```
 
-**Despliegue:**
+### Archivo `.env.production` para Docker
+
+```env
+APP_ENV=production
+APP_NAME="Jasmin API Gateway"
+SECRET_KEY=<clave-secreta>
+ADMIN_API_KEY=<api-key-produccion>
+
+# En Docker, los hosts se resuelven por nombre de servicio
+JASMIN_TELNET_HOST=jasmin
+JASMIN_TELNET_PORT=8990
+JASMIN_TELNET_USER=jcliadmin
+JASMIN_TELNET_PASSWORD=jclipwd
+JASMIN_TELNET_TIMEOUT=10
+
+JASMIN_HTTP_HOST=jasmin
+JASMIN_HTTP_PORT=1401
+
+LOGGER_LEVEL=WARNING
+LOGGER_MIDDLEWARE_ENABLED=True
+LOGGER_MIDDLEWARE_ERRORS_ONLY=True
+
+DOCS_ENABLED=False
+RATE_LIMIT_DEFAULT=60/minute
+
+JASMIN_SCRIPTS_DIR=/etc/jasmin/scripts
+```
+
+### Construir y levantar
 
 ```bash
-gcloud run deploy mi-api \
-  --source . \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated
+# Primera vez
+docker-compose up -d --build
+
+# Ver logs del gateway
+docker-compose logs -f jasmin-api-gateway
+
+# Verificar estado
+docker-compose ps
+
+# Reiniciar solo el gateway (sin afectar Jasmin)
+docker-compose restart jasmin-api-gateway
 ```
 
-## Optimizaciones
+### Opción B2: Gateway fuera de Docker (Jasmin en Docker)
 
-### Gunicorn + Uvicorn Workers
+Si prefieres no dockerizar el gateway:
 
 ```bash
-# Instalar gunicorn
-uv add gunicorn
+# El gateway corre en el host, Jasmin en Docker
+# Mapear el puerto jcli al host en el docker-compose de Jasmin:
+#   ports:
+#     - "127.0.0.1:8990:8990"   # jcli solo en loopback del host
 
-# Ejecutar
-uv run gunicorn main:app \
-  --workers 4 \
-  --worker-class uvicorn.workers.UvicornWorker \
-  --bind 0.0.0.0:8000 \
-  --timeout 120
+# En el .env del gateway:
+JASMIN_TELNET_HOST=127.0.0.1
+JASMIN_TELNET_PORT=8990
+JASMIN_HTTP_HOST=127.0.0.1
+JASMIN_HTTP_PORT=1401
 ```
-
-### Caching con Redis
-
-```bash
-uv add redis aiocache
-```
-
-```python
-from aiocache import Cache
-from aiocache.serializers import JsonSerializer
-
-cache = Cache(Cache.REDIS, endpoint="localhost", port=6379, serializer=JsonSerializer())
-
-@cached(ttl=300, cache=cache)
-async def get_expensive_data():
-    # ...
-    pass
-```
-
-### CDN para Estáticos
-
-Si sirves archivos estáticos, usa CDN (CloudFlare, AWS CloudFront, etc.).
-
-### Database Connection Pooling
-
-Ya configurado en `app/core/database.py`:
-
-```python
-self.engine = create_engine(DB_URL,
-    pool_size=10,           # Conexiones permanentes
-    max_overflow=20,        # Conexiones adicionales temporales
-    pool_recycle=180,       # Reciclar conexiones cada 3 min
-    pool_pre_ping=True      # Validar antes de usar
-)
-```
-
-## Monitoreo
-
-### Logs
-
-#### Logging a Archivo
-
-```python
-# app/core/logger.py
-from logging.handlers import RotatingFileHandler
-
-file_handler = RotatingFileHandler(
-    'app.log',
-    maxBytes=10*1024*1024,  # 10 MB
-    backupCount=5
-)
-logger.addHandler(file_handler)
-```
-
-#### Servicios de Logging
-
-- **Sentry**: Tracking de errores
-- **LogRocket**: Session replay + logs
-- **Datadog**: APM + logs
-- **Papertrail**: Agregación de logs
-
-**Sentry:**
-
-```bash
-uv add sentry-sdk[fastapi]
-```
-
-```python
-# main.py
-import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-
-if APP_ENV == "production":
-    sentry_sdk.init(
-        dsn="your-sentry-dsn",
-        integrations=[FastApiIntegration()],
-        traces_sample_rate=1.0,
-    )
-```
-
-### Métricas
-
-#### Prometheus
-
-```bash
-uv add prometheus-client
-```
-
-```python
-from prometheus_client import Counter, Histogram, generate_latest
-
-REQUEST_COUNT = Counter('request_count', 'Total requests')
-REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency')
-
-@app.middleware("http")
-async def metrics_middleware(request, call_next):
-    REQUEST_COUNT.inc()
-    with REQUEST_LATENCY.time():
-        response = await call_next(request)
-    return response
-
-@app.get("/metrics")
-async def metrics():
-    return Response(generate_latest(), media_type="text/plain")
-```
-
-### Health Checks
-
-```python
-@app.get("/health")
-async def health():
-    # Verificar BD
-    try:
-        db.execute_query("SELECT 1", fetchone=True)
-        db_status = "ok"
-    except:
-        db_status = "error"
-
-    return {
-        "status": "ok" if db_status == "ok" else "degraded",
-        "database": db_status
-    }
-```
-
-## Seguridad
-
-### HTTPS
-
-- **Producción**: Siempre usar HTTPS
-- **Let's Encrypt**: Certificados SSL gratuitos
-- **Nginx**: Configurar SSL correctamente
-
-### Headers de Seguridad
-
-```python
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
-
-if APP_ENV == "production":
-    app.add_middleware(HTTPSRedirectMiddleware)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["api.example.com"])
-```
-
-### CORS
-
-```python
-from fastapi.middleware.cors import CORSMiddleware
-
-origins = ["https://miapp.com"]  # Solo dominios permitidos
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
-)
-```
-
-### Rate Limiting
-
-```bash
-uv add slowapi
-```
-
-```python
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-@app.get("/")
-@limiter.limit("60/minute")
-async def root(request: Request):
-    return {"message": "Hello World"}
-```
-
-## Backups
-
-### Base de Datos
-
-```bash
-#!/bin/bash
-# backup.sh
-
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/backups"
-DB_NAME="api_production"
-
-mysqldump -u root -p$DB_PASS $DB_NAME | gzip > $BACKUP_DIR/backup_$DATE.sql.gz
-
-# Mantener solo últimos 7 días
-find $BACKUP_DIR -name "backup_*.sql.gz" -mtime +7 -delete
-```
-
-Agregar a crontab:
-
-```bash
-# Backup diario a las 2 AM
-0 2 * * * /home/api/backup.sh
-```
-
-## Troubleshooting
-
-### Logs de Aplicación
-
-```bash
-# Ver logs del servicio
-sudo journalctl -u api -f
-
-# Ver últimas 100 líneas
-sudo journalctl -u api -n 100
-```
-
-### Reiniciar Servicios
-
-```bash
-# Reiniciar API
-sudo systemctl restart api
-
-# Reiniciar Nginx
-sudo systemctl restart nginx
-
-# Ver estado
-sudo systemctl status api nginx
-```
-
-### Verificar Conexiones
-
-```bash
-# Ver conexiones a puerto 8000
-sudo netstat -tulpn | grep 8000
-
-# Ver procesos de la app
-ps aux | grep uvicorn
-```
-
-## Checklist de Despliegue
-
-- [ ] Variables de entorno configuradas
-- [ ] SECRET_KEY generada de forma segura
-- [ ] Base de datos configurada
-- [ ] Migraciones aplicadas (`alembic upgrade head`)
-- [ ] SSL/HTTPS configurado
-- [ ] Nginx/Reverse proxy configurado
-- [ ] Logs configurados
-- [ ] Monitoreo configurado (Sentry, etc.)
-- [ ] Backups automáticos configurados
-- [ ] Health check endpoint funcionando
-- [ ] Rate limiting configurado
-- [ ] CORS configurado correctamente
-- [ ] Firewall configurado
-- [ ] Dominio apuntando al servidor
-
-## Recursos
-
-- [FastAPI Deployment](https://fastapi.tiangolo.com/deployment/)
-- [Uvicorn Deployment](https://www.uvicorn.org/deployment/)
-- [Nginx Documentation](https://nginx.org/en/docs/)
-- [Let's Encrypt](https://letsencrypt.org/)
 
 ---
 
-**¡Tu aplicación está lista para producción!**
+## Variables de entorno — Referencia completa
+
+| Variable | Requerida | Default | Descripción |
+|----------|-----------|---------|-------------|
+| `APP_ENV` | No | `development` | `production` activa validaciones estrictas |
+| `APP_NAME` | No | `FastAPI Project` | Nombre en la documentación |
+| `SECRET_KEY` | **Sí (prod)** | — | Clave interna. Genera: `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `ADMIN_API_KEY` | **Sí (prod)** | — | Clave para `X-API-Key`. Genera: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `JASMIN_TELNET_HOST` | No | `localhost` | Host del jcli de Jasmin |
+| `JASMIN_TELNET_PORT` | No | `8990` | Puerto del jcli |
+| `JASMIN_TELNET_USER` | No | `jcliadmin` | Usuario jcli |
+| `JASMIN_TELNET_PASSWORD` | No | `jclipwd` | Contraseña jcli |
+| `JASMIN_TELNET_TIMEOUT` | No | `10` | Timeout (segundos) por comando jcli |
+| `JASMIN_HTTP_HOST` | No | `localhost` | Host del HTTP API de Jasmin |
+| `JASMIN_HTTP_PORT` | No | `1401` | Puerto del HTTP API |
+| `JASMIN_SCRIPTS_DIR` | No | `/etc/jasmin/scripts` | Directorio para scripts de interceptores |
+| `DOCS_ENABLED` | No | `True` | Habilitar `/docs` y `/redoc` |
+| `DOCS_PASSWORD_ENABLED` | No | `False` | Proteger docs con HTTP Basic Auth |
+| `DOCS_USER` | No | `admin` | Usuario para docs protegidas |
+| `DOCS_PASSWORD` | No | — | Contraseña para docs protegidas |
+| `LOGGER_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `LOGGER_MIDDLEWARE_ENABLED` | No | `True` | Loggear cada request/response |
+| `LOGGER_MIDDLEWARE_ERRORS_ONLY` | No | `False` | Solo loggear errores (4xx/5xx) |
+| `LOGGER_MIDDLEWARE_SHOW_HEADERS` | No | `False` | Incluir headers en logs (keys sensibles se redactan automáticamente) |
+| `LOGGER_MIDDLEWARE_SHOW_BODY` | No | `True` | Incluir body en logs |
+| `RATE_LIMIT_DEFAULT` | No | `100/minute` | Límite global por IP |
+| `RATE_LIMIT_REDIS_ENABLED` | No | `False` | Usar Redis para contadores (multi-worker) |
+| `RATE_LIMIT_REDIS_URL` | No | `redis://localhost:6379` | URI de Redis |
+| `CORS_ORIGINS` | No | `*` | Orígenes permitidos, separados por coma |
+| `REQUEST_MAX_SIZE_MB` | No | `10` | Tamaño máximo de request en MB |
+
+---
+
+## Actualizar el gateway
+
+### Nativo (systemd)
+
+```bash
+cd /home/jasmin-gw/api-gateway
+git pull
+uv sync --no-dev
+sudo systemctl restart jasmin-api-gateway
+```
+
+### Docker
+
+```bash
+git pull
+docker-compose up -d --build jasmin-api-gateway
+```
+
+---
+
+## Checklist de producción
+
+- [ ] `APP_ENV=production`
+- [ ] `SECRET_KEY` generada de forma segura
+- [ ] `ADMIN_API_KEY` generada de forma segura y almacenada en bóveda de secretos
+- [ ] `DOCS_ENABLED=False` (o protegida con contraseña)
+- [ ] `LOGGER_MIDDLEWARE_SHOW_HEADERS=False`
+- [ ] `LOGGER_MIDDLEWARE_SHOW_BODY=False`
+- [ ] `CORS_ORIGINS` restringido a dominios conocidos (no `*`)
+- [ ] Nginx configurado como reverse proxy
+- [ ] HTTPS activo (certificado TLS)
+- [ ] Puerto 8990 (jcli) NO expuesto al exterior
+- [ ] Puerto 8000 (gateway) NO expuesto directamente (solo via Nginx)
+- [ ] Servicio configurado para reiniciarse automáticamente
+- [ ] Logs funcionando (`journalctl -u jasmin-api-gateway`)
+- [ ] Health check respondiendo: `GET /health`
