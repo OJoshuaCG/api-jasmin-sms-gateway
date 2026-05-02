@@ -34,6 +34,9 @@ LOGGER_MIDDLEWARE_SHOW_PATH_PARAMS = (
 LOGGER_EXCEPTIONS_ENABLED = (
     os.getenv("LOGGER_EXCEPTIONS_ENABLED", "False").lower() == "true"
 )
+LOGGER_MIDDLEWARE_ERRORS_ONLY = (
+    os.getenv("LOGGER_MIDDLEWARE_ERRORS_ONLY", "False").lower() == "true"
+)
 
 # ======= Docs variables ======= #
 DOCS_ENABLED = os.getenv("DOCS_ENABLED", "True").lower() == "true"

@@ -99,6 +99,7 @@ LOGGER_MIDDLEWARE_SHOW_QUERY_PARAMS # True/False
 LOGGER_MIDDLEWARE_SHOW_BODY         # True/False
 LOGGER_MIDDLEWARE_SHOW_PATH_PARAMS  # True = path real, False = template
 LOGGER_EXCEPTIONS_ENABLED          # True/False
+LOGGER_MIDDLEWARE_ERRORS_ONLY      # True/False — True suprime logs normales; errores (4xx/5xx) siempre registran REQUEST+ERROR+RESPONSE
 
 # Database
 DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT

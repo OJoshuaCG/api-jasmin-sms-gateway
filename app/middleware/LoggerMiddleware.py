@@ -5,6 +5,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.context import current_http_identifier
 from app.core.environments import (
+    LOGGER_MIDDLEWARE_ERRORS_ONLY,
     LOGGER_MIDDLEWARE_SHOW_BODY,
     LOGGER_MIDDLEWARE_SHOW_HEADERS,
     LOGGER_MIDDLEWARE_SHOW_PATH_PARAMS,
@@ -12,8 +13,9 @@ from app.core.environments import (
 )
 from app.core.logger import get_logger
 
-# Configuración del logger usando la función centralizada
 logger = get_logger()
+
+_SENSITIVE_PATHS = {"/user/login"}
 
 
 class LoggerMiddleware(BaseHTTPMiddleware):
@@ -21,7 +23,6 @@ class LoggerMiddleware(BaseHTTPMiddleware):
         unique_id = current_http_identifier.get()
         start_time = time.time()
 
-        # Obtener datos de la solicitud
         method = request.method
         path = request.url.path
         query_string = request.url.query or None
@@ -33,46 +34,60 @@ class LoggerMiddleware(BaseHTTPMiddleware):
         except Exception:
             body = "<no body>"
 
-        # Procesar la solicitud
         response = await call_next(request)
         process_time = round(time.time() - start_time, 3)
 
-        # Determinar el path a mostrar: ruta con template o URL real
         if LOGGER_MIDDLEWARE_SHOW_PATH_PARAMS:
             display_path = path
         else:
             route = request.scope.get("route")
             display_path = route.path if route else path
 
-        logger_info_request = [
+        is_error = response.status_code >= 400
+
+        if LOGGER_MIDDLEWARE_ERRORS_ONLY and not is_error:
+            return response
+
+        # REQUEST
+        request_parts = [
             str(unique_id),
             f"Host: {client_ip}",
             f"Request: {method} {display_path}",
         ]
-
         if LOGGER_MIDDLEWARE_SHOW_BODY:
-            logger_info_request.append(
-                f"Body: {'<cannot show>' if path in ['/user/login'] else body}"
+            request_parts.append(
+                f"Body: {'<cannot show>' if path in _SENSITIVE_PATHS else body}"
             )
-
         if LOGGER_MIDDLEWARE_SHOW_QUERY_PARAMS:
-            logger_info_request.append(
+            request_parts.append(
                 f"Query: {query_string if query_string else '<no parameters>'}"
             )
-
         if LOGGER_MIDDLEWARE_SHOW_HEADERS:
-            logger_info_request.append(f"Headers: {headers}")
+            request_parts.append(f"Headers: {headers}")
 
-        logger.info(" | ".join(logger_info_request))
+        logger.info(" | ".join(request_parts))
 
-        # Registrar respuesta
-        logger_info_response = [
+        # ERROR (solo cuando hay error)
+        if is_error:
+            error_parts = [
+                str(unique_id),
+                f"Host: {client_ip}",
+                f"Error: {method} {display_path}",
+                f"Status: {response.status_code}",
+            ]
+            if response.status_code >= 500:
+                logger.error(" | ".join(error_parts))
+            else:
+                logger.warning(" | ".join(error_parts))
+
+        # RESPONSE
+        response_parts = [
             str(unique_id),
             f"Host: {client_ip}",
             f"Response: {method} {display_path}",
             f"Status: {response.status_code}",
             f"Duration: {process_time}s",
         ]
-        logger.info(" | ".join(logger_info_response))
+        logger.info(" | ".join(response_parts))
 
         return response
