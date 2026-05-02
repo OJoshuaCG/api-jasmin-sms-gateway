@@ -1,0 +1,33 @@
+from app.routes.v1 import (
+    filters,
+    groups,
+    http_connectors,
+    mo_interceptors,
+    mo_routes,
+    mt_interceptors,
+    mt_routes,
+    smpp_connectors,
+    smpp_server,
+    sms,
+    stats,
+    system,
+    test,
+    users,
+)
+
+__all__ = [
+    "filters",
+    "groups",
+    "http_connectors",
+    "mo_interceptors",
+    "mo_routes",
+    "mt_interceptors",
+    "mt_routes",
+    "smpp_connectors",
+    "smpp_server",
+    "sms",
+    "stats",
+    "system",
+    "test",
+    "users",
+]
