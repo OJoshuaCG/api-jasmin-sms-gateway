@@ -99,10 +99,18 @@ class JasminTelnetSession:
                 asyncio.open_connection(self._host, self._port),
                 timeout=self._timeout,
             )
-            # Offer TTYPE proactively — real telnet clients do this, and Jasmin's
-            # Twisted server uses the DONT TTYPE exchange to complete negotiation
-            # before sending the Username prompt.
-            writer.write(b"\xff\xfb\x18")  # IAC WILL TTYPE
+            # Send standard telnet client options — Jasmin's Twisted server requires
+            # WILL LINEMODE + SB LINEMODE to complete negotiation before sending
+            # the Username prompt. Captured via tcpdump from a real telnet session.
+            writer.write(
+                b"\xff\xfd\x03"                          # IAC DO SGA
+                b"\xff\xfb\x22"                          # IAC WILL LINEMODE
+                b"\xff\xfa\x22\x01\x00\xff\xf0"          # IAC SB LINEMODE MODE=0 IAC SE
+                b"\xff\xfb\x1f"                          # IAC WILL NAWS
+                b"\xff\xfa\x1f\x00\x50\x00\x18\xff\xf0"  # IAC SB NAWS 80x24 IAC SE
+                b"\xff\xfb\x03"                          # IAC WILL SGA
+                b"\xff\xfd\x01"                          # IAC DO ECHO
+            )
             await writer.drain()
             await self._telnet_read_until(reader, writer, _USERNAME_PROMPT.encode())
             writer.write((self._user + "\r\n").encode())
