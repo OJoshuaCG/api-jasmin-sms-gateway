@@ -99,6 +99,7 @@ class JasminTelnetSession:
                 asyncio.open_connection(self._host, self._port),
                 timeout=self._timeout,
             )
+            await self._negotiate_telnet(reader, writer)
             await self._read_raw_until(reader, _USERNAME_PROMPT.encode())
             writer.write((self._user + "\r\n").encode())
             await writer.drain()
@@ -135,6 +136,55 @@ class JasminTelnetSession:
     # ------------------------------------------------------------------ #
     #  Internal I/O helpers
     # ------------------------------------------------------------------ #
+
+    async def _negotiate_telnet(self, reader: StreamReader, writer: StreamWriter) -> None:
+        """
+        Read the initial Telnet negotiation burst from Jasmin and respond.
+        Jasmin sends IAC sequences before the Username prompt and waits for
+        responses before proceeding — without this, the connection times out.
+
+        IAC DO X   (FF FD X) → IAC WONT X  (we decline all server requests)
+        IAC WILL X (FF FB X) → IAC DO X    (we accept server doing it)
+        IAC DONT X (FF FE X) → IAC WONT X  (confirm we won't)
+        IAC WONT X (FF FC X) → IAC DONT X  (confirm we don't want it)
+        IAC SB ... IAC SE    → skipped entirely (variable-length subnegotiation)
+        """
+        try:
+            banner = await asyncio.wait_for(reader.read(4096), timeout=self._timeout)
+        except asyncio.TimeoutError:
+            raise ConnectionError("No initial data received from Jasmin jcli")
+
+        response = bytearray()
+        i = 0
+        while i < len(banner):
+            if banner[i] == 0xFF and i + 1 < len(banner):
+                cmd = banner[i + 1]
+                if cmd == 0xFA:  # IAC SB — subnegotiation, skip until IAC SE (FF F0)
+                    i += 2
+                    while i < len(banner) - 1:
+                        if banner[i] == 0xFF and banner[i + 1] == 0xF0:
+                            i += 2
+                            break
+                        i += 1
+                elif i + 2 < len(banner):
+                    opt = banner[i + 2]
+                    if cmd == 0xFD:    # IAC DO   → WONT
+                        response += bytes([0xFF, 0xFC, opt])
+                    elif cmd == 0xFB:  # IAC WILL → DO
+                        response += bytes([0xFF, 0xFD, opt])
+                    elif cmd == 0xFE:  # IAC DONT → WONT
+                        response += bytes([0xFF, 0xFC, opt])
+                    elif cmd == 0xFC:  # IAC WONT → DONT
+                        response += bytes([0xFF, 0xFE, opt])
+                    i += 3
+                else:
+                    i += 1
+            else:
+                i += 1
+
+        if response:
+            writer.write(bytes(response))
+            await writer.drain()
 
     async def _read_raw_until(self, reader: StreamReader, delimiter: bytes) -> bytes:
         """
