@@ -35,8 +35,9 @@ async def lifespan(app: FastAPI):
         )
     except Exception as exc:
         logger.warning(
-            "Could not connect to Jasmin jcli on startup: %s. "
+            "Could not connect to Jasmin jcli on startup: %s: %s. "
             "The API will start in degraded mode and retry automatically.",
+            type(exc).__name__,
             exc,
         )
         # Still create the instance so get_instance() works; it will reconnect

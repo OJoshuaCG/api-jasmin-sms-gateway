@@ -7,14 +7,14 @@ from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Jasmin jcli prompts — adjust via env vars if your Jasmin version differs.
+# Jasmin jcli prompts — Jasmin 0.11.x uses "jcli : " as main prompt.
 # The main prompt always appears after every command completes.
 # The interactive sub-prompt appears when jcli waits for field input.
-_MAIN_PROMPT = "jcli> "
+_MAIN_PROMPT = "jcli : "
 
 # Some Jasmin builds use "> " (single >) others use ">> " (double >).
 # Both are listed. Detection relies on endswith() sorted by length (longest first),
-# so "jcli> " is always checked before "> " — preventing the "> " ⊂ "jcli> " ambiguity.
+# so "jcli : " is always checked before "> " — preventing the "> " ⊂ "jcli : " ambiguity.
 _INTERACTIVE_PROMPTS = [">> ", "> "]
 
 # All prompts sorted longest-first for safe endswith detection
@@ -117,7 +117,7 @@ class JasminTelnetSession:
             logger.info("Connected to Jasmin jcli")
         except Exception as exc:
             self._connected = False
-            logger.error("Failed to connect to Jasmin jcli: %s", exc)
+            logger.error("Failed to connect to Jasmin jcli: %s: %s", type(exc).__name__, exc)
             raise
 
     async def disconnect(self) -> None:
@@ -322,7 +322,7 @@ class JasminTelnetSession:
                 self._reconnecting = False
                 return
             except Exception as exc:
-                logger.error("Reconnect attempt failed: %s", exc)
+                logger.error("Reconnect attempt failed: %s: %s", type(exc).__name__, exc)
                 delay = min(delay * 2, 30)
 
     async def force_reconnect(self) -> None:
