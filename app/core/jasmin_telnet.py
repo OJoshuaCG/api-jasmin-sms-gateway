@@ -99,14 +99,18 @@ class JasminTelnetSession:
                 asyncio.open_connection(self._host, self._port),
                 timeout=self._timeout,
             )
-            await self._negotiate_telnet(reader, writer)
-            await self._read_raw_until(reader, _USERNAME_PROMPT.encode())
+            # Offer TTYPE proactively — real telnet clients do this, and Jasmin's
+            # Twisted server uses the DONT TTYPE exchange to complete negotiation
+            # before sending the Username prompt.
+            writer.write(b"\xff\xfb\x18")  # IAC WILL TTYPE
+            await writer.drain()
+            await self._telnet_read_until(reader, writer, _USERNAME_PROMPT.encode())
             writer.write((self._user + "\r\n").encode())
             await writer.drain()
-            await self._read_raw_until(reader, _PASSWORD_PROMPT.encode())
+            await self._telnet_read_until(reader, writer, _PASSWORD_PROMPT.encode())
             writer.write((self._password + "\r\n").encode())
             await writer.drain()
-            welcome = await self._read_raw_until(reader, _MAIN_PROMPT.encode())
+            welcome = await self._telnet_read_until(reader, writer, _MAIN_PROMPT.encode())
             if b"Authentication failure" in welcome or b"Login incorrect" in welcome:
                 writer.close()
                 raise ConnectionError("jcli authentication failed — check JASMIN_TELNET_USER/PASSWORD")
@@ -137,54 +141,61 @@ class JasminTelnetSession:
     #  Internal I/O helpers
     # ------------------------------------------------------------------ #
 
-    async def _negotiate_telnet(self, reader: StreamReader, writer: StreamWriter) -> None:
+    async def _telnet_read_until(
+        self, reader: StreamReader, writer: StreamWriter, delimiter: bytes
+    ) -> bytes:
         """
-        Read the initial Telnet negotiation burst from Jasmin and respond.
-        Jasmin sends IAC sequences before the Username prompt and waits for
-        responses before proceeding — without this, the connection times out.
+        Read from the Telnet stream handling IAC sequences on the fly, until
+        the accumulated non-IAC text ends with `delimiter`.
 
-        IAC DO X   (FF FD X) → IAC WONT X  (we decline all server requests)
-        IAC WILL X (FF FB X) → IAC DO X    (we accept server doing it)
-        IAC DONT X (FF FE X) → IAC WONT X  (confirm we won't)
-        IAC WONT X (FF FC X) → IAC DONT X  (confirm we don't want it)
-        IAC SB ... IAC SE    → skipped entirely (variable-length subnegotiation)
+        Jasmin's negotiation spans multiple rounds (server sends options, we
+        respond, server sends more options in reply, we respond again, and only
+        then sends the prompt). A single up-front negotiation phase is not enough.
+
+        IAC DO X   (FF FD X) → WONT X, except SGA (03) → WILL SGA (full-duplex)
+        IAC WILL X (FF FB X) → DO X
+        IAC DONT X (FF FE X) → WONT X
+        IAC WONT X (FF FC X) → DONT X
+        IAC SB...SE          → skipped (variable-length subnegotiation)
         """
-        try:
-            banner = await asyncio.wait_for(reader.read(4096), timeout=self._timeout)
-        except asyncio.TimeoutError:
-            raise ConnectionError("No initial data received from Jasmin jcli")
-
-        response = bytearray()
-        i = 0
-        while i < len(banner):
-            if banner[i] == 0xFF and i + 1 < len(banner):
-                cmd = banner[i + 1]
-                if cmd == 0xFA:  # IAC SB — subnegotiation, skip until IAC SE (FF F0)
-                    i += 2
-                    while i < len(banner) - 1:
-                        if banner[i] == 0xFF and banner[i + 1] == 0xF0:
-                            i += 2
-                            break
+        text = b""
+        while not text.endswith(delimiter):
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=self._timeout)
+            if not chunk:
+                raise ConnectionError("Connection closed by server")
+            iac_response = bytearray()
+            i = 0
+            while i < len(chunk):
+                if chunk[i] == 0xFF and i + 1 < len(chunk):
+                    cmd = chunk[i + 1]
+                    if cmd == 0xFA:  # SB: skip to IAC SE (FF F0)
+                        i += 2
+                        while i < len(chunk) - 1:
+                            if chunk[i] == 0xFF and chunk[i + 1] == 0xF0:
+                                i += 2
+                                break
+                            i += 1
+                    elif i + 2 < len(chunk):
+                        opt = chunk[i + 2]
+                        if cmd == 0xFD:    # DO
+                            if opt == 0x03: iac_response += bytes([0xFF, 0xFB, opt])  # SGA → WILL
+                            else:           iac_response += bytes([0xFF, 0xFC, opt])  # rest → WONT
+                        elif cmd == 0xFB:  # WILL → DO
+                            iac_response += bytes([0xFF, 0xFD, opt])
+                        elif cmd == 0xFE:  # DONT → WONT
+                            iac_response += bytes([0xFF, 0xFC, opt])
+                        elif cmd == 0xFC:  # WONT → DONT
+                            iac_response += bytes([0xFF, 0xFE, opt])
+                        i += 3
+                    else:
                         i += 1
-                elif i + 2 < len(banner):
-                    opt = banner[i + 2]
-                    if cmd == 0xFD:    # IAC DO   → WONT
-                        response += bytes([0xFF, 0xFC, opt])
-                    elif cmd == 0xFB:  # IAC WILL → DO
-                        response += bytes([0xFF, 0xFD, opt])
-                    elif cmd == 0xFE:  # IAC DONT → WONT
-                        response += bytes([0xFF, 0xFC, opt])
-                    elif cmd == 0xFC:  # IAC WONT → DONT
-                        response += bytes([0xFF, 0xFE, opt])
-                    i += 3
                 else:
+                    text += bytes([chunk[i]])
                     i += 1
-            else:
-                i += 1
-
-        if response:
-            writer.write(bytes(response))
-            await writer.drain()
+            if iac_response:
+                writer.write(bytes(iac_response))
+                await writer.drain()
+        return text
 
     async def _read_raw_until(self, reader: StreamReader, delimiter: bytes) -> bytes:
         """
