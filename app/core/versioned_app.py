@@ -103,6 +103,7 @@ def create_versioned_app(
         docs_url="/docs" if DOCS_ENABLED and not docs_protected else None,
         redoc_url="/redoc" if DOCS_ENABLED and not docs_protected else None,
         openapi_url="/openapi.json" if DOCS_ENABLED and not docs_protected else None,
+        servers=[{"url": f"/api/{version}", "description": f"API {version.upper()}"}],
     )
 
     if docs_protected:
