@@ -17,6 +17,13 @@ if LOGGER_EXCEPTIONS_ENABLED:
     logger = get_logger(level="WARNING")
 
 
+def _request_id(request: Request) -> str:
+    # request.state.request_id is set by ContextMiddleware before call_next(),
+    # so it survives the finally-reset that clears the ContextVar when exceptions
+    # bubble up past ContextMiddleware to ServerErrorMiddleware.
+    return getattr(request.state, "request_id", None) or current_http_identifier.get() or "-"
+
+
 async def app_exception_handler(request: Request, exc: AppHttpException):
     detail_error = {
         "msg": exc.message,
@@ -25,7 +32,7 @@ async def app_exception_handler(request: Request, exc: AppHttpException):
 
     if LOGGER_EXCEPTIONS_ENABLED:
         logger_warning_exception = [
-            current_http_identifier.get(),
+            _request_id(request),
             f"Exception: {exc.__class__.__name__}",
             f"Message: {exc.message}",
             f"Status Code: {exc.status_code}",
@@ -52,7 +59,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
     if LOGGER_EXCEPTIONS_ENABLED:
         logger_params = [
-            str(current_http_identifier.get()),
+            _request_id(request),
             "Exception: RateLimitExceeded",
             f"Limit: {exc.detail}",
             f"IP: {request.client.host if request.client else 'unknown'}",
@@ -86,7 +93,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
     if LOGGER_EXCEPTIONS_ENABLED:
         logger_params = [
-            str(current_http_identifier.get()),
+            _request_id(request),
             "Exception: RequestValidationError",
             f"Fields: {', '.join(field_names)}",
         ]
@@ -109,7 +116,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
     if LOGGER_EXCEPTIONS_ENABLED:
         logger_warning_exception_params = [
-            current_http_identifier.get(),
+            _request_id(request),
             f"Exception: {exc.__class__.__name__}",
             f'Message: UNHANDLED EXC. "{str(exc)}"',
             f"File: {trace_info['origin']['file']}",
