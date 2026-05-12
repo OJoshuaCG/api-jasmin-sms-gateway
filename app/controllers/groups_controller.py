@@ -29,7 +29,7 @@ class GroupsController:
 
     async def get_group(self, gid: str) -> GroupOut:
         try:
-            output = await _telnet().execute(f"group --show -g {gid}")
+            output = await _telnet().execute(f"group --show {gid}")
         except TelnetNotConnectedError as exc:
             _handle_not_connected(exc)
         if not output or "Error" in output or "Unknown" in output:
@@ -38,7 +38,11 @@ class GroupsController:
 
     async def create_group(self, data: GroupCreate) -> GroupOut:
         try:
-            output = await _telnet().execute(f"group --add -g {data.gid}", persist=True)
+            output = await _telnet().execute_interactive(
+                "group --add",
+                [("gid", data.gid)],
+                persist=True,
+            )
         except TelnetNotConnectedError as exc:
             _handle_not_connected(exc)
         if not is_success(output):
@@ -50,7 +54,7 @@ class GroupsController:
 
     async def update_group(self, gid: str, data: GroupUpdate) -> GroupOut:
         await self.get_group(gid)  # 404 if not exists
-        cmd = f"group --{'enable' if data.enabled else 'disable'} -g {gid}"
+        cmd = f"group --{'enable' if data.enabled else 'disable'} {gid}"
         try:
             output = await _telnet().execute(cmd, persist=True)
         except TelnetNotConnectedError as exc:
@@ -62,7 +66,7 @@ class GroupsController:
     async def delete_group(self, gid: str) -> None:
         await self.get_group(gid)  # 404 if not exists
         try:
-            output = await _telnet().execute(f"group --remove -g {gid}", persist=True)
+            output = await _telnet().execute(f"group --remove {gid}", persist=True)
         except TelnetNotConnectedError as exc:
             _handle_not_connected(exc)
         if not is_success(output):

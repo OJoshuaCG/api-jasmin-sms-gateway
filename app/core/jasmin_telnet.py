@@ -357,6 +357,7 @@ class JasminTelnetSession:
         response_lower = response.lower()
         if (
             "persistence storage updated" not in response_lower
+            and "persisted" not in response_lower
             and "success" not in response_lower
             and "updated" not in response_lower
         ):
