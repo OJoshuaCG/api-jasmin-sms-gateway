@@ -1,9 +1,12 @@
 """
 Parsers for Jasmin jcli text output.
 
-jcli produces two main output formats:
-  - List:  header + '#N id col2 ...' rows + 'Total: N ...' footer
-  - Show:  'key   : value' lines, optionally with nested section headers
+jcli produces several output formats depending on the command:
+  - List:  '#entity_id col2 ...' rows (no row numbers) + 'Total: N' footer
+  - Show (space-kv):  'key value' lines (smppccm, user)
+  - Show (eq-kv):    'key = value' lines (httpccm, filter with params)
+  - Show (one-liner): 'Type to connector [rated N|NOT RATED]' (routes, interceptors)
+  - Route/Interceptor list: '#order Type ...' rows (order in the # prefix)
 """
 
 import re
@@ -14,8 +17,7 @@ from typing import Any
 # ------------------------------------------------------------------ #
 
 def is_success(response: str) -> bool:
-    # Error lines take priority — a message like "Error: connector already started"
-    # must not be treated as success just because "started" appears in it.
+    # Error lines take priority
     for line in response.splitlines():
         if line.strip().lower().startswith("error"):
             return False
@@ -39,7 +41,9 @@ def is_success(response: str) -> bool:
 def extract_error_message(response: str) -> str:
     for line in response.splitlines():
         stripped = line.strip()
-        if stripped.lower().startswith(("error", "failed", "unknown")):
+        if not stripped:
+            continue
+        if stripped.lower().startswith(("error", "failed", "unknown", "you must")):
             return stripped
     return response.strip() or "Unknown jcli error"
 
@@ -49,8 +53,8 @@ def parse_bool(value: str) -> bool:
 
 
 def parse_nullable(value: str) -> Any:
-    """Return None for 'None'/'UD'/'null', else the raw string."""
-    if value.strip().lower() in ("none", "ud", "null", "-"):
+    """Return None for 'None'/'UD'/'ND'/'null'/'-', else the raw string."""
+    if value.strip().lower() in ("none", "ud", "nd", "null", "-"):
         return None
     return value.strip()
 
@@ -76,48 +80,38 @@ def parse_int_nullable(value: str) -> int | None:
 
 
 # ------------------------------------------------------------------ #
-#  List output parser
+#  Key-value helpers
 # ------------------------------------------------------------------ #
 
-def parse_list_ids(output: str) -> list[str]:
+def parse_space_kv(output: str) -> dict[str, str]:
+    """Parse 'key value' space-separated pairs (smppccm show, user show).
+    Handles empty values (single-token lines).
     """
-    Extract IDs from '--list' output.  Lines look like:
-        #1 myid    other_columns...
-    Returns the second token (after '#N') as the ID.
-    """
-    ids: list[str] = []
+    result: dict[str, str] = {}
     for line in output.splitlines():
-        line = line.strip()
-        if re.match(r"^#\d+\s+", line):
-            parts = line.split()
-            if len(parts) >= 2:
-                ids.append(parts[1])
-    return ids
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts = stripped.split(None, 1)
+        key = parts[0]
+        value = parts[1].strip() if len(parts) > 1 else ""
+        result[key] = value
+    return result
 
 
-def parse_list_rows(output: str) -> list[list[str]]:
-    """
-    Extract all data rows as token lists (excluding the '#N' prefix).
-    Used when multiple columns are needed.
-    """
-    rows: list[list[str]] = []
+def parse_eq_kv(output: str) -> dict[str, str]:
+    """Parse 'key = value' pairs (httpccm show, filter show with params)."""
+    result: dict[str, str] = {}
     for line in output.splitlines():
-        line = line.strip()
-        if re.match(r"^#\d+\s+", line):
-            parts = line.split()
-            rows.append(parts[1:])  # skip '#N'
-    return rows
+        stripped = line.strip()
+        if " = " in stripped:
+            key, _, value = stripped.partition(" = ")
+            result[key.strip()] = value.strip()
+    return result
 
-
-# ------------------------------------------------------------------ #
-#  Key-value show parser
-# ------------------------------------------------------------------ #
 
 def parse_kv(output: str) -> dict[str, str]:
-    """
-    Parse simple 'key   : value' pairs into a flat dict.
-    Section headers (lines without ' : ') are ignored.
-    """
+    """Parse 'key   : value' pairs (legacy format, kept for compatibility)."""
     result: dict[str, str] = {}
     for line in output.splitlines():
         if " : " in line:
@@ -126,47 +120,44 @@ def parse_kv(output: str) -> dict[str, str]:
     return result
 
 
-def parse_nested_kv(output: str) -> dict[str, Any]:
-    """
-    Parse jcli 'show' output with up to two levels of nested sections.
+# ------------------------------------------------------------------ #
+#  List output parsers (no row numbers, '#entity_id ...' format)
+# ------------------------------------------------------------------ #
 
-    Indentation determines depth:
-      indent == 0  → top-level k:v or top-level section header
-      indent  > 0, current section set → sub-section header or k:v inside section/subsection
-    """
-    result: dict[str, Any] = {}
-    current_section: dict[str, Any] | None = None
-    current_subsection: dict[str, str] | None = None
-
+def _parse_hash_rows(output: str, skip_starts: tuple[str, ...] = ()) -> list[list[str]]:
+    """Extract rows from '#...' lines. Skips header lines matching skip_starts."""
+    rows: list[list[str]] = []
     for line in output.splitlines():
-        if not line.strip():
+        line = line.strip()
+        if not line.startswith("#"):
             continue
-        indent = len(line) - len(line.lstrip())
-        stripped = line.strip()
+        content = line[1:].strip()
+        if not content:
+            continue
+        parts = content.split()
+        if not parts:
+            continue
+        # Skip header lines
+        if skip_starts and parts[0].lower().startswith(skip_starts):
+            continue
+        rows.append(parts)
+    return rows
 
-        if " : " in stripped:
-            key, _, value = stripped.partition(" : ")
-            kv = {key.strip(): value.strip()}
-            if current_subsection is not None:
-                current_subsection.update(kv)
-            elif current_section is not None:
-                current_section.update(kv)
-            else:
-                result.update(kv)
-        elif stripped.endswith(":") and " : " not in stripped:
-            name = stripped.rstrip(":")
-            if indent == 0 or current_section is None:
-                # Top-level section — resets sub-section context
-                current_section = {}
-                result[name] = current_section
-                current_subsection = None
-            else:
-                # Sub-section inside the current top-level section
-                current_subsection = {}
-                current_section[name] = current_subsection
-        # else: ignore decorative separator lines
 
-    return result
+def _parse_order_rows(output: str) -> list[tuple[int, list[str]]]:
+    """Extract rows from '#N ...' lines where N is a numeric order.
+    Returns list of (order, rest_parts).
+    """
+    rows: list[tuple[int, list[str]]] = []
+    for line in output.splitlines():
+        line = line.strip()
+        m = re.match(r'^#(\d+)\s+(.*)', line)
+        if not m:
+            continue
+        order = int(m.group(1))
+        rest = m.group(2).split()
+        rows.append((order, rest))
+    return rows
 
 
 # ------------------------------------------------------------------ #
@@ -174,15 +165,24 @@ def parse_nested_kv(output: str) -> dict[str, Any]:
 # ------------------------------------------------------------------ #
 
 def parse_group_list(output: str) -> list[dict]:
-    """Parse 'group --list' output."""
+    """Parse 'group --list' output.
+
+    Format: '#gid' per line for enabled groups, '#!gid' for disabled groups.
+    Header line '#Group id' is skipped.
+    """
     groups = []
-    for row in parse_list_rows(output):
-        if not row:
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
             continue
-        groups.append({
-            "gid": row[0],
-            "enabled": parse_bool(row[1]) if len(row) > 1 else True,
-        })
+        raw = line[1:].strip()
+        if not raw or raw.lower().startswith("group"):
+            continue
+        # Disabled groups are prefixed with '!'
+        if raw.startswith("!"):
+            groups.append({"gid": raw[1:].strip(), "enabled": False})
+        else:
+            groups.append({"gid": raw, "enabled": True})
     return groups
 
 
@@ -195,78 +195,87 @@ def parse_group_show(output: str) -> dict:
 
 
 def parse_user_list(output: str) -> list[dict]:
-    """Parse 'user --list' — columns: uid, gid, enabled."""
+    """Parse 'user --list' output.
+
+    Format: '#uid  gid  username  ...' per line (no row-number prefix).
+    Disabled users appear as '#!uid'. Header line '#User id ...' is skipped.
+    """
     users = []
-    for row in parse_list_rows(output):
-        if len(row) < 1:
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
+            continue
+        raw = line[1:]
+        enabled = True
+        if raw.startswith("!"):
+            enabled = False
+            raw = raw[1:]
+        parts = raw.split()
+        if not parts or parts[0].lower() == "user":
             continue
         users.append({
-            "uid": row[0],
-            "gid": row[1] if len(row) > 1 else "",
-            "enabled": parse_bool(row[2]) if len(row) > 2 else True,
+            "uid": parts[0],
+            "gid": parts[1] if len(parts) > 1 else "",
+            "enabled": enabled,
         })
     return users
 
 
-def _find_section(kv: dict, *prefixes: str) -> dict:
-    """Return the first dict value whose key starts with any of the given prefixes (case-insensitive)."""
-    for key, val in kv.items():
-        for prefix in prefixes:
-            if key.lower().startswith(prefix.lower()):
-                return val if isinstance(val, dict) else {}
-    return {}
-
-
 def parse_user_show(output: str) -> dict:
-    """Parse 'user --show' nested output.
+    """Parse 'user -s UID' output.
 
-    Jasmin section names vary slightly across versions; _find_section() matches
-    by prefix so "MT Messaging" and "MT Messaging cred" both resolve correctly.
+    Format: space-separated 'key value' (2 tokens) or
+    'section subsection field value' (4 tokens).
     """
-    kv = parse_nested_kv(output)
+    top: dict[str, str] = {}
+    nested: dict[str, dict[str, dict[str, str]]] = {}
 
-    mt = _find_section(kv, "MT Messaging", "mt messaging")
-    mt_quota = _find_section(mt, "quota")
-    mt_auth = _find_section(mt, "authorization", "auth")
-    mt_vf = _find_section(mt, "value_filter", "valuefilter", "value filter")
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            top[parts[0]] = parts[1]
+        elif len(parts) == 4:
+            section, subsection, field, value = parts
+            nested.setdefault(section, {}).setdefault(subsection, {})[field] = value
 
-    smpps = _find_section(kv, "SMPPS", "SMPP Server", "smpp server")
-    smpps_auth = _find_section(smpps, "authorization", "auth")
-    smpps_quota = _find_section(smpps, "quota")
+    mt_quota = nested.get("mt_messaging_cred", {}).get("quota", {})
+    mt_auth = nested.get("mt_messaging_cred", {}).get("authorization", {})
+    mt_vf = nested.get("mt_messaging_cred", {}).get("valuefilter", {})
+    smpps_auth = nested.get("smpps_cred", {}).get("authorization", {})
+    smpps_quota = nested.get("smpps_cred", {}).get("quota", {})
 
-    def _g(d: dict, key: str, default: str = "") -> str:
-        return str(d.get(key, default))
+    def g(d: dict, key: str, default: str = "ND") -> str:
+        return d.get(key, default)
 
     return {
-        "uid": str(kv.get("uid", "")),
-        "gid": str(kv.get("gid", "")),
-        "enabled": str(kv.get("status", "Enabled")).lower() == "enabled",
-        "mt_throughput": parse_float_nullable(_g(mt_quota, "http_throughput", "UD")),
-        "mo_throughput": None,
-        "balance": parse_float_nullable(_g(mt_quota, "balance", "UD")),
-        "sms_count": parse_int_nullable(_g(mt_quota, "sms_count", "UD")),
-        "mt_auth_priority": parse_bool(_g(mt_auth, "priority", "True")),
-        "mt_auth_validity_period": parse_bool(_g(mt_auth, "validity_period", "True")),
-        "mt_auth_src_addr": parse_bool(_g(mt_auth, "src_addr", "True")),
-        "mt_auth_schedule_at": parse_bool(_g(mt_auth, "schedule_at", "True")),
-        "mt_auth_dlr_level": parse_bool(_g(mt_auth, "dlr_level", "True")),
-        # Jasmin stores this as "http_long_content" in the authorization sub-section
-        "mt_auth_long_content": parse_bool(_g(mt_auth, "http_long_content", "True")),
-        "mt_filter_src_addr": parse_nullable(_g(mt_vf, "src_addr", "None")),
-        "mt_filter_dst_addr": parse_nullable(_g(mt_vf, "dst_addr", "None")),
-        "mt_filter_content": parse_nullable(_g(mt_vf, "content", "None")),
-        "smpps_allow_bind": parse_bool(_g(smpps_auth, "bind", "True")),
-        "smpps_max_bindings": parse_int_nullable(_g(smpps_quota, "max_bindings", "UD")),
-        # Jasmin stores this as "quota_sms_count" (not "sms_count") inside the SMPPS quota
-        "smpps_quota_sms_count": parse_int_nullable(_g(smpps_quota, "quota_sms_count", "UD")),
-        "smpps_throughput": parse_float_nullable(_g(smpps_quota, "throughput", "UD")),
+        "uid": top.get("uid", ""),
+        "gid": top.get("gid", ""),
+        "username": top.get("username", ""),
+        "enabled": True,  # not exposed in user -s; updated via enable/disable
+        "mt_throughput": parse_float_nullable(g(mt_quota, "http_throughput")),
+        "mo_throughput": parse_float_nullable(g(mt_quota, "smpps_throughput")),
+        "balance": parse_float_nullable(g(mt_quota, "balance")),
+        "sms_count": parse_int_nullable(g(mt_quota, "sms_count")),
+        "mt_auth_priority": parse_bool(g(mt_auth, "priority", "True")),
+        "mt_auth_validity_period": parse_bool(g(mt_auth, "validity_period", "True")),
+        "mt_auth_src_addr": parse_bool(g(mt_auth, "src_addr", "True")),
+        "mt_auth_schedule_at": parse_bool(g(mt_auth, "schedule_delivery_time", "True")),
+        "mt_auth_dlr_level": parse_bool(g(mt_auth, "dlr_level", "True")),
+        "mt_auth_long_content": parse_bool(g(mt_auth, "http_long_content", "True")),
+        "mt_filter_src_addr": parse_nullable(g(mt_vf, "src_addr", "None")),
+        "mt_filter_dst_addr": parse_nullable(g(mt_vf, "dst_addr", "None")),
+        "mt_filter_content": parse_nullable(g(mt_vf, "content", "None")),
+        "smpps_allow_bind": parse_bool(g(smpps_auth, "bind", "True")),
+        "smpps_max_bindings": parse_int_nullable(g(smpps_quota, "max_bindings")),
+        "smpps_quota_sms_count": parse_int_nullable(g(smpps_quota, "quota_sms_count")),
+        "smpps_throughput": parse_float_nullable(g(smpps_quota, "smpps_throughput")),
     }
 
 
 def parse_smppccm_list(output: str) -> list[dict]:
-    """Parse 'smppccm --list' — columns: cid, service_status, sessions_count."""
+    """Parse 'smppccm --list' — format: '#cid service session starts stops'."""
     connectors = []
-    for row in parse_list_rows(output):
+    for row in _parse_hash_rows(output, skip_starts=("connector",)):
         if not row:
             continue
         connectors.append({
@@ -278,110 +287,206 @@ def parse_smppccm_list(output: str) -> list[dict]:
 
 
 def parse_smppccm_show(output: str) -> dict:
-    kv = parse_kv(output)
+    """Parse 'smppccm -s CID' output (space-separated key value pairs).
+
+    Jasmin field names differ from the API schema:
+      bind (type) → bind_to in schema
+      systype     → system_type
+      addr_range  → address_range
+      src_ton     → source_addr_ton
+      src_npi     → source_addr_npi
+      dst_ton     → dest_addr_ton
+      dst_npi     → dest_addr_npi
+      con_loss_retry  → reconnect_on_connection_loss
+      con_loss_delay  → reconnect_on_connection_loss_delay
+      con_fail_retry  → reconnect_on_connection_failure
+      con_fail_delay  → reconnect_on_connection_failure_delay
+    """
+    kv = parse_space_kv(output)
     return {
         "cid": kv.get("cid", ""),
         "host": kv.get("host", ""),
         "port": int(kv.get("port", "2775") or "2775"),
         "username": kv.get("username", ""),
-        "bind_to": kv.get("bind_to", "transceiver"),
-        "system_type": parse_nullable(kv.get("system_type", "None") or "None"),
-        "interface_version": kv.get("interface_version", "34"),
-        "address_range": parse_nullable(kv.get("address_range", "None") or "None"),
-        "source_addr_ton": parse_int_nullable(kv.get("source_addr_ton", "None") or "None"),
-        "source_addr_npi": parse_int_nullable(kv.get("source_addr_npi", "None") or "None"),
-        "dest_addr_ton": parse_int_nullable(kv.get("dest_addr_ton", "None") or "None"),
-        "dest_addr_npi": parse_int_nullable(kv.get("dest_addr_npi", "None") or "None"),
+        "bind_to": kv.get("bind", "transceiver"),
+        "system_type": parse_nullable(kv.get("systype", "") or "None"),
+        "interface_version": "34",
+        "address_range": parse_nullable(kv.get("addr_range", "None") or "None"),
+        "source_addr_ton": parse_int_nullable(kv.get("src_ton", "None") or "None"),
+        "source_addr_npi": parse_int_nullable(kv.get("src_npi", "None") or "None"),
+        "dest_addr_ton": parse_int_nullable(kv.get("dst_ton", "None") or "None"),
+        "dest_addr_npi": parse_int_nullable(kv.get("dst_npi", "None") or "None"),
         "submit_throughput": parse_float_nullable(kv.get("submit_throughput", "None") or "None"),
         "dlr_expiry": parse_int_nullable(kv.get("dlr_expiry", "None") or "None"),
-        "reconnect_on_connection_loss": parse_bool(kv.get("reconnect_on_connection_loss", "True")),
-        "reconnect_on_connection_loss_delay": int(kv.get("reconnect_on_connection_loss_delay", "10") or "10"),
-        "reconnect_on_connection_failure": parse_bool(kv.get("reconnect_on_connection_failure", "True")),
-        "reconnect_on_connection_failure_delay": int(kv.get("reconnect_on_connection_failure_delay", "10") or "10"),
+        "reconnect_on_connection_loss": parse_bool(kv.get("con_loss_retry", "yes")),
+        "reconnect_on_connection_loss_delay": int(kv.get("con_loss_delay", "10") or "10"),
+        "reconnect_on_connection_failure": parse_bool(kv.get("con_fail_retry", "yes")),
+        "reconnect_on_connection_failure_delay": int(kv.get("con_fail_delay", "10") or "10"),
     }
 
 
 def parse_httpccm_list(output: str) -> list[dict]:
+    """Parse 'httpccm --list' — format: '#cid type method url'."""
     connectors = []
-    for row in parse_list_rows(output):
+    for row in _parse_hash_rows(output, skip_starts=("httpcc",)):
         if not row:
             continue
         connectors.append({
             "cid": row[0],
-            "method": row[1] if len(row) > 1 else "",
-            "url": row[2] if len(row) > 2 else "",
+            "method": row[2] if len(row) > 2 else "",
+            "url": row[3] if len(row) > 3 else "",
         })
     return connectors
 
 
 def parse_httpccm_show(output: str) -> dict:
-    kv = parse_kv(output)
+    """Parse 'httpccm -s CID' output (key = value format).
+
+    Jasmin uses 'baseurl' internally; the API exposes it as 'url'.
+    """
+    kv = parse_eq_kv(output)
     return {
         "cid": kv.get("cid", ""),
-        "url": kv.get("url", ""),
+        "url": kv.get("baseurl", kv.get("url", "")),
         "method": kv.get("method", "GET"),
     }
 
 
 def parse_filter_list(output: str) -> list[dict]:
+    """Parse 'filter --list' — format: '#fid type routes description'."""
     filters = []
-    for row in parse_list_rows(output):
+    for row in _parse_hash_rows(output, skip_starts=("filter",)):
         if not row:
             continue
         filters.append({
             "fid": row[0],
             "type": row[1] if len(row) > 1 else "",
+            "params": {},
         })
     return filters
 
 
 def parse_filter_show(output: str) -> dict:
-    kv = parse_kv(output)
-    params = {}
-    skip_keys = {"fid", "type"}
-    for k, v in kv.items():
-        if k not in skip_keys:
-            params[k] = v
-    return {
-        "fid": kv.get("fid", ""),
-        "type": kv.get("type", ""),
-        "params": params,
-    }
+    """Parse 'filter -s FID' output.
+
+    Simple filters (e.g. TransparentFilter): just the type name on one line.
+    Parametrized filters: 'TypeName:' then 'key = value' lines.
+    Returns {'type': ..., 'params': {...}} — fid must be added by the caller.
+    """
+    type_name = ""
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Skip the command echo line and 'jcli :' prompt
+        if stripped.startswith(("filter", "jcli")):
+            continue
+        # First matching line is the type
+        if stripped[0].isupper():
+            type_name = stripped.rstrip(":")
+            break
+
+    params = parse_eq_kv(output)
+    return {"type": type_name, "params": params}
 
 
 def parse_route_list(output: str) -> list[dict]:
-    """Parse mtrouter/morouter --list — columns: order, type, ..."""
+    """Parse mtrouter/morouter --list.
+
+    Format: '#order Type Rate Connector Filter(s)'
+    The '#order' prefix contains the numeric route order.
+    filter_raw captures the raw Jasmin filter indicator (e.g. '<T>' for TransparentFilter).
+    """
     routes = []
-    for row in parse_list_rows(output):
-        if not row:
+    for line in output.splitlines():
+        line = line.strip()
+        m = re.match(r'^#(\d+)\s+(.*)', line)
+        if not m:
             continue
-        routes.append({
-            "order": int(row[0]) if row[0].isdigit() else 0,
-            "type": row[1] if len(row) > 1 else "",
-        })
+        order = int(m.group(1))
+        rest = m.group(2).split()
+        type_ = rest[0] if rest else ""
+        # Filter indicator is the last angle-bracket token on the line, if present
+        filter_raw = ""
+        bracket = re.search(r'(<[^>]+>)\s*$', m.group(2))
+        if bracket:
+            filter_raw = bracket.group(1)
+        routes.append({"order": order, "type": type_, "filter_raw": filter_raw})
     return routes
 
 
+def parse_mt_route_show(output: str, order: int) -> dict:
+    """Parse 'mtrouter -s ORDER' one-liner.
+
+    Format: 'Type to connector [rated N.NN|NOT RATED]'
+    """
+    for line in output.splitlines():
+        line = line.strip()
+        m = re.match(r'^(\w+)\s+to\s+(\S+)\s+(NOT RATED|rated\s+([\d.]+))', line)
+        if m:
+            rate_str = m.group(4)
+            return {
+                "order": order,
+                "type": m.group(1),
+                "connectors": [m.group(2)],
+                "filters": [],
+                "rate": float(rate_str) if rate_str else None,
+            }
+    return {"order": order, "type": "", "connectors": [], "filters": [], "rate": None}
+
+
+def parse_mo_route_show(output: str, order: int) -> dict:
+    """Parse 'morouter -s ORDER' one-liner.
+
+    Format: 'Type to connector [NOT RATED|rated N.NN]'
+    """
+    for line in output.splitlines():
+        line = line.strip()
+        m = re.match(r'^(\w+)\s+to\s+(\S+)', line)
+        if m:
+            return {
+                "order": order,
+                "type": m.group(1),
+                "connector": m.group(2),
+                "filters": [],
+            }
+    return {"order": order, "type": "", "connector": "", "filters": []}
+
+
 def parse_route_show(output: str) -> dict:
-    kv = parse_kv(output)
-    return kv
+    """Legacy alias — returns raw kv from output (kept for compatibility)."""
+    return parse_kv(output)
 
 
 def parse_interceptor_list(output: str) -> list[dict]:
+    """Parse mtinterceptor/mointerceptor --list.
+
+    Format: '#order Type Script Filter(s)'
+    The '#order' prefix contains the numeric interceptor order.
+    """
     interceptors = []
-    for row in parse_list_rows(output):
-        if not row:
-            continue
-        interceptors.append({
-            "order": int(row[0]) if row[0].isdigit() else 0,
-            "type": row[1] if len(row) > 1 else "",
-        })
+    for order, rest in _parse_order_rows(output):
+        type_ = rest[0] if rest else ""
+        interceptors.append({"order": order, "type": type_})
     return interceptors
 
 
 def parse_interceptor_show(output: str) -> dict:
-    kv = parse_kv(output)
-    return kv
+    """Parse 'mtinterceptor -s ORDER' / 'mointerceptor -s ORDER' one-liner.
+
+    Format: 'Type/<script_repr>'
+    Script path cannot be recovered from this output.
+    """
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("mtinterceptor", "mointerceptor", "jcli")):
+            continue
+        if "/" in stripped:
+            type_ = stripped.split("/")[0]
+            return {"type": type_}
+    return {"type": ""}
 
 
 def parse_smppserver_show(output: str) -> dict:
@@ -393,28 +498,211 @@ def parse_smppserver_show(output: str) -> dict:
     }
 
 
-def parse_stats_global(output: str) -> dict:
-    kv = parse_kv(output)
-    return kv
+def _parse_stats_hash_kv(output: str) -> dict[str, str]:
+    """Parse stats output: '#Key   Value' lines (hash-prefixed key-value pairs)."""
+    result: dict[str, str] = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
+            continue
+        content = line[1:].strip()
+        if not content:
+            continue
+        parts = content.split(None, 1)
+        if len(parts) == 2:
+            result[parts[0]] = parts[1].strip()
+        elif len(parts) == 1:
+            result[parts[0]] = ""
+    return result
 
 
-def parse_stats_smppccm(output: str, cid: str) -> dict:
-    kv = parse_kv(output)
+def parse_stats_smppc(output: str, cid: str) -> dict:
+    """Parse 'stats --smppc=CID' output (#Item Value format)."""
+    kv = _parse_stats_hash_kv(output)
     return {
         "cid": cid,
-        "status": kv.get("status", "unknown"),
-        "sent_count": parse_int_nullable(kv.get("sent_count", "0")) or 0,
-        "received_count": parse_int_nullable(kv.get("received_count", "0")) or 0,
-        "error_count": parse_int_nullable(kv.get("error_count", "0")) or 0,
-        "last_activity_at": parse_nullable(kv.get("last_activity_at", "None")),
+        "created_at": parse_nullable(kv.get("created_at", "ND")),
+        "connected_at": parse_nullable(kv.get("connected_at", "ND")),
+        "bound_at": parse_nullable(kv.get("bound_at", "ND")),
+        "disconnected_at": parse_nullable(kv.get("disconnected_at", "ND")),
+        "last_received_pdu_at": parse_nullable(kv.get("last_received_pdu_at", "ND")),
+        "last_sent_pdu_at": parse_nullable(kv.get("last_sent_pdu_at", "ND")),
+        "connected_count": int(kv.get("connected_count", "0") or "0"),
+        "bound_count": int(kv.get("bound_count", "0") or "0"),
+        "disconnected_count": int(kv.get("disconnected_count", "0") or "0"),
+        "submit_sm_request_count": int(kv.get("submit_sm_request_count", "0") or "0"),
+        "submit_sm_count": int(kv.get("submit_sm_count", "0") or "0"),
+        "deliver_sm_count": int(kv.get("deliver_sm_count", "0") or "0"),
+        "elink_count": int(kv.get("elink_count", "0") or "0"),
+        "throttling_error_count": int(kv.get("throttling_error_count", "0") or "0"),
+        "other_submit_error_count": int(kv.get("other_submit_error_count", "0") or "0"),
+        "interceptor_error_count": int(kv.get("interceptor_error_count", "0") or "0"),
+        "interceptor_count": int(kv.get("interceptor_count", "0") or "0"),
     }
 
 
+def parse_stats_smppcs(output: str) -> list[dict]:
+    """Parse 'stats --smppcs' tabular output.
+
+    Format: #cid  Connected_at  Bound_at  Disconnected_at  Submits  Delivers  QoS_errs  Other_errs
+    Header row starts with '#Connector'.
+    """
+    rows = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
+            continue
+        content = line[1:].strip()
+        if not content or content.lower().startswith("connector"):
+            continue
+        parts = content.split()
+        if not parts:
+            continue
+        rows.append({
+            "cid": parts[0],
+            "connected_at": parse_nullable(parts[1]) if len(parts) > 1 else None,
+            "bound_at": parse_nullable(parts[2]) if len(parts) > 2 else None,
+            "disconnected_at": parse_nullable(parts[3]) if len(parts) > 3 else None,
+            "submits": parts[4] if len(parts) > 4 else "0/0",
+            "delivers": parts[5] if len(parts) > 5 else "0/0",
+            "qos_errors": int(parts[6]) if len(parts) > 6 and parts[6].isdigit() else 0,
+            "other_errors": int(parts[7]) if len(parts) > 7 and parts[7].isdigit() else 0,
+        })
+    return rows
+
+
 def parse_stats_user(output: str, uid: str) -> dict:
-    kv = parse_kv(output)
+    """Parse 'stats --user=UID' output.
+
+    Format: '#Item   Type   Value' (3 columns).
+    Items are grouped by Type: 'SMPP Server' and 'HTTP Api'.
+    bound_connections_count value is a JSON dict — extract the total.
+    """
+    smpp: dict[str, str] = {}
+    http: dict[str, str] = {}
+
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
+            continue
+        content = line[1:].strip()
+        if not content or content.lower().startswith("item"):
+            continue
+        # Split into at most 3 parts: item, type_prefix, value
+        # Type is 2 words ("SMPP Server" or "HTTP Api"), so we split differently
+        if "SMPP Server" in content:
+            key = content.split("SMPP Server")[0].strip()
+            val = content.split("SMPP Server", 1)[1].strip()
+            smpp[key] = val
+        elif "HTTP Api" in content:
+            key = content.split("HTTP Api")[0].strip()
+            val = content.split("HTTP Api", 1)[1].strip()
+            http[key] = val
+
+    def _int(d: dict, k: str) -> int:
+        v = d.get(k, "0").strip()
+        # Handle JSON dict values like {"bind_receiver": 0, ...} — sum values
+        if v.startswith("{"):
+            try:
+                import json
+                obj = json.loads(v)
+                return sum(obj.values()) if isinstance(obj, dict) else 0
+            except Exception:
+                return 0
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return 0
+
     return {
         "uid": uid,
-        "mt_count": parse_int_nullable(kv.get("mt_count", "0")) or 0,
-        "mo_count": parse_int_nullable(kv.get("mo_count", "0")) or 0,
-        "last_activity_at": parse_nullable(kv.get("last_activity_at", "None")),
+        "smpp_bind_count": _int(smpp, "bind_count"),
+        "smpp_unbind_count": _int(smpp, "unbind_count"),
+        "smpp_bound_connections": _int(smpp, "bound_connections_count"),
+        "smpp_submit_sm_request_count": _int(smpp, "submit_sm_request_count"),
+        "smpp_submit_sm_count": _int(smpp, "submit_sm_count"),
+        "smpp_deliver_sm_count": _int(smpp, "deliver_sm_count"),
+        "smpp_elink_count": _int(smpp, "elink_count"),
+        "smpp_throttling_error_count": _int(smpp, "throttling_error_count"),
+        "smpp_other_submit_error_count": _int(smpp, "other_submit_error_count"),
+        "smpp_last_activity_at": parse_nullable(smpp.get("last_activity_at", "ND")),
+        "http_connects_count": _int(http, "connects_count"),
+        "http_submit_sm_request_count": _int(http, "submit_sm_request_count"),
+        "http_balance_request_count": _int(http, "balance_request_count"),
+        "http_rate_request_count": _int(http, "rate_request_count"),
+        "http_last_activity_at": parse_nullable(http.get("last_activity_at", "ND")),
+    }
+
+
+def parse_stats_users(output: str) -> list[dict]:
+    """Parse 'stats --users' tabular output.
+
+    Format: #uid  SMPP_Bound  SMPP_LA  HTTP_requests  HTTP_LA
+    Header row starts with '#User'.
+    """
+    rows = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
+            continue
+        content = line[1:].strip()
+        if not content or content.lower().startswith("user"):
+            continue
+        parts = content.split()
+        if not parts:
+            continue
+        rows.append({
+            "uid": parts[0],
+            "smpp_bound_connections": int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0,
+            "smpp_last_activity": parse_nullable(parts[2]) if len(parts) > 2 else None,
+            "http_request_count": int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0,
+            "http_last_activity": parse_nullable(parts[4]) if len(parts) > 4 else None,
+        })
+    return rows
+
+
+def parse_stats_httpapi(output: str) -> dict:
+    """Parse 'stats --httpapi' output (#Item Value format)."""
+    kv = _parse_stats_hash_kv(output)
+    return {
+        "created_at": parse_nullable(kv.get("created_at", "ND")),
+        "last_request_at": parse_nullable(kv.get("last_request_at", "ND")),
+        "last_success_at": parse_nullable(kv.get("last_success_at", "ND")),
+        "request_count": int(kv.get("request_count", "0") or "0"),
+        "success_count": int(kv.get("success_count", "0") or "0"),
+        "auth_error_count": int(kv.get("auth_error_count", "0") or "0"),
+        "route_error_count": int(kv.get("route_error_count", "0") or "0"),
+        "interceptor_error_count": int(kv.get("interceptor_error_count", "0") or "0"),
+        "interceptor_count": int(kv.get("interceptor_count", "0") or "0"),
+        "throughput_error_count": int(kv.get("throughput_error_count", "0") or "0"),
+        "charging_error_count": int(kv.get("charging_error_count", "0") or "0"),
+        "server_error_count": int(kv.get("server_error_count", "0") or "0"),
+    }
+
+
+def parse_stats_smppsapi(output: str) -> dict:
+    """Parse 'stats --smppsapi' output (#Item Value format)."""
+    kv = _parse_stats_hash_kv(output)
+    return {
+        "created_at": parse_nullable(kv.get("created_at", "ND")),
+        "last_received_pdu_at": parse_nullable(kv.get("last_received_pdu_at", "ND")),
+        "last_sent_pdu_at": parse_nullable(kv.get("last_sent_pdu_at", "ND")),
+        "connected_count": int(kv.get("connected_count", "0") or "0"),
+        "connect_count": int(kv.get("connect_count", "0") or "0"),
+        "disconnect_count": int(kv.get("disconnect_count", "0") or "0"),
+        "bound_trx_count": int(kv.get("bound_trx_count", "0") or "0"),
+        "bound_rx_count": int(kv.get("bound_rx_count", "0") or "0"),
+        "bound_tx_count": int(kv.get("bound_tx_count", "0") or "0"),
+        "bind_trx_count": int(kv.get("bind_trx_count", "0") or "0"),
+        "bind_rx_count": int(kv.get("bind_rx_count", "0") or "0"),
+        "bind_tx_count": int(kv.get("bind_tx_count", "0") or "0"),
+        "unbind_count": int(kv.get("unbind_count", "0") or "0"),
+        "submit_sm_request_count": int(kv.get("submit_sm_request_count", "0") or "0"),
+        "submit_sm_count": int(kv.get("submit_sm_count", "0") or "0"),
+        "deliver_sm_count": int(kv.get("deliver_sm_count", "0") or "0"),
+        "elink_count": int(kv.get("elink_count", "0") or "0"),
+        "throttling_error_count": int(kv.get("throttling_error_count", "0") or "0"),
+        "other_submit_error_count": int(kv.get("other_submit_error_count", "0") or "0"),
+        "interceptor_error_count": int(kv.get("interceptor_error_count", "0") or "0"),
+        "interceptor_count": int(kv.get("interceptor_count", "0") or "0"),
     }

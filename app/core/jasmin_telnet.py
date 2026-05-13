@@ -334,8 +334,15 @@ class JasminTelnetSession:
                 # Confirm and collect final result
                 self._writer.write(b"ok\r\n")
                 await self._writer.drain()
-                response = await self._read_until(_MAIN_PROMPT)
-                response = self._strip_prompt(response)
+                ok_content, ok_match = await self._read_until_one_of(_ALL_PROMPTS)
+                if self._is_interactive_match(ok_match):
+                    # ok was rejected (e.g. missing required fields) — exit interactive mode
+                    self._writer.write(b"ko\r\n")
+                    await self._writer.drain()
+                    await self._read_until(_MAIN_PROMPT)
+                    response = ok_content.strip()
+                else:
+                    response = ok_content.strip()
 
                 if persist:
                     await self._persist_unlocked()
