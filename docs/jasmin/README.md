@@ -21,6 +21,7 @@ Esta carpeta documenta cada módulo administrable de Jasmin a través de la API 
 | Estadísticas | [stats.md](./stats.md) | Métricas en tiempo real de conectores, usuarios y APIs |
 | Servidor SMPP | [smpp-server.md](./smpp-server.md) | Configuración del servidor SMPP inbound de Jasmin |
 | Sistema | [system.md](./system.md) | Persistencia, recarga y estado de la sesión Telnet |
+| **Insights** | [**insights.md**](./insights.md) | **Vistas compuestas para dashboards y monitoreo** |
 
 ---
 
