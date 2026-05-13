@@ -46,15 +46,15 @@ class SystemController:
         try:
             return await _telnet().persist()
         except TelnetNotConnectedError as exc:
-            raise AppHttpException("Jasmin is not available", 503, {"detail": str(exc)})
+            raise AppHttpException("Jasmin is not available", 503, {"error": str(exc)})
 
     async def reload(self) -> str:
         try:
             output = await _telnet().execute("load")
         except TelnetNotConnectedError as exc:
-            raise AppHttpException("Jasmin is not available", 503, {"detail": str(exc)})
-        if not is_success(output) and "loading" not in output.lower():
-            raise AppHttpException(extract_error_message(output), 400)
+            raise AppHttpException("Jasmin is not available", 503, {"error": str(exc)})
+        if not is_success(output) and "loaded" not in output.lower():
+            raise AppHttpException(extract_error_message(output), 400, {"command": "load"})
         return "Configuration reloaded from disk"
 
     async def reconnect(self) -> str:
@@ -62,7 +62,7 @@ class SystemController:
             await _telnet().force_reconnect()
             return "Reconnected successfully"
         except Exception as exc:
-            raise AppHttpException(f"Reconnect failed: {exc}", 503)
+            raise AppHttpException("Reconnect failed", 503, {"error": str(exc)})
 
     async def session_info(self) -> SessionOut:
         info = await _telnet().session_info()

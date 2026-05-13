@@ -5,8 +5,11 @@ from app.core.jasmin_parsers import (
     parse_user_show,
 )
 from app.core.jasmin_telnet import JasminTelnetSession, TelnetNotConnectedError
+from app.core.logger import get_logger
 from app.exceptions import AppHttpException
 from app.schemas.users import UserCreate, UserOut, UserStatusUpdate, UserUpdate
+
+logger = get_logger(__name__)
 
 
 def _telnet() -> JasminTelnetSession:
@@ -14,7 +17,7 @@ def _telnet() -> JasminTelnetSession:
 
 
 def _503(exc: TelnetNotConnectedError) -> None:
-    raise AppHttpException("Jasmin is not available", 503, {"detail": str(exc)})
+    raise AppHttpException("Jasmin is not available", 503, {"error": str(exc)})
 
 
 def _ud(value) -> str:
@@ -33,6 +36,9 @@ def _build_user_fields(data: UserCreate | UserUpdate) -> list[tuple[str, str]]:
 
     if isinstance(data, UserUpdate) and data.gid is not None:
         fields.append(("gid", data.gid))
+
+    if isinstance(data, UserUpdate) and data.username is not None:
+        fields.append(("username", data.username))
 
     # Throughput
     if data.mt_throughput is not None:
@@ -89,29 +95,49 @@ class UsersController:
             output = await _telnet().execute("user --list")
         except TelnetNotConnectedError as exc:
             _503(exc)
+        logger.debug("user --list raw output: %r", output)
         rows = parse_user_list(output)
+        enabled_map = {r["uid"]: r["enabled"] for r in rows}
         result = []
         for r in rows:
             try:
-                result.append(await self.get_user(r["uid"]))
-            except AppHttpException:
+                show_out = await _telnet().execute(f"user -s {r['uid']}")
+                if not show_out or "Error" in show_out or "Unknown" in show_out:
+                    continue
+                user = UserOut(**parse_user_show(show_out))
+                user.enabled = enabled_map.get(r["uid"], True)
+                result.append(user)
+            except (TelnetNotConnectedError, AppHttpException):
                 pass
         return result
 
+    async def _get_enabled(self, uid: str) -> bool:
+        """Fetch enabled state from user --list (user -s doesn't expose it)."""
+        try:
+            list_out = await _telnet().execute("user --list")
+        except TelnetNotConnectedError:
+            return True
+        for row in parse_user_list(list_out):
+            if row["uid"] == uid:
+                return row["enabled"]
+        return True
+
     async def get_user(self, uid: str) -> UserOut:
         try:
-            output = await _telnet().execute(f"user --show -u {uid}")
+            output = await _telnet().execute(f"user -s {uid}")
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not output or "Error" in output or "Unknown" in output:
-            raise AppHttpException(f"User '{uid}' not found", 404)
-        return UserOut(**parse_user_show(output))
+            raise AppHttpException(f"User '{uid}' not found", 404, {"uid": uid})
+        user = UserOut(**parse_user_show(output))
+        user.enabled = await self._get_enabled(uid)
+        return user
 
     async def create_user(self, data: UserCreate) -> UserOut:
-        fields = _build_user_fields(data)
+        fields = [("uid", data.uid), ("gid", data.gid), ("username", data.username)] + _build_user_fields(data)
         try:
             output = await _telnet().execute_interactive(
-                f"user --add -u {data.uid} -g {data.gid}",
+                "user --add",
                 fields,
                 persist=True,
             )
@@ -120,8 +146,8 @@ class UsersController:
         if not is_success(output):
             msg = extract_error_message(output)
             if "already" in msg.lower():
-                raise AppHttpException(f"User '{data.uid}' already exists", 409)
-            raise AppHttpException(msg, 400)
+                raise AppHttpException(f"User '{data.uid}' already exists", 409, {"uid": data.uid, "gid": data.gid})
+            raise AppHttpException(msg, 400, {"uid": data.uid, "gid": data.gid})
         return await self.get_user(data.uid)
 
     async def update_user(self, uid: str, data: UserUpdate) -> UserOut:
@@ -131,32 +157,32 @@ class UsersController:
             return await self.get_user(uid)
         try:
             output = await _telnet().execute_interactive(
-                f"user --update -u {uid}",
+                f"user -u {uid}",
                 fields,
                 persist=True,
             )
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            raise AppHttpException(extract_error_message(output), 400)
+            raise AppHttpException(extract_error_message(output), 400, {"uid": uid})
         return await self.get_user(uid)
 
     async def delete_user(self, uid: str) -> None:
         await self.get_user(uid)
         try:
-            output = await _telnet().execute(f"user --remove -u {uid}", persist=True)
+            output = await _telnet().execute(f"user -r {uid}", persist=True)
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            raise AppHttpException(extract_error_message(output), 400)
+            raise AppHttpException(extract_error_message(output), 400, {"uid": uid})
 
     async def update_user_status(self, uid: str, data: UserStatusUpdate) -> UserOut:
         await self.get_user(uid)
-        cmd = f"user --{'enable' if data.enabled else 'disable'} -u {uid}"
+        cmd = f"user -{'e' if data.enabled else 'd'} {uid}"
         try:
             output = await _telnet().execute(cmd, persist=True)
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            raise AppHttpException(extract_error_message(output), 400)
+            raise AppHttpException(extract_error_message(output), 400, {"uid": uid, "enabled": data.enabled})
         return await self.get_user(uid)

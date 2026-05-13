@@ -1,3 +1,5 @@
+import json as _json
+
 import httpx
 
 from app.core.jasmin_http import get_jasmin_http_client
@@ -40,7 +42,7 @@ class SmsController:
         try:
             resp = await _http_client().get("/send", params=params)
         except httpx.RequestError as exc:
-            raise AppHttpException("Cannot reach Jasmin HTTP API", 503, {"detail": str(exc)})
+            raise AppHttpException("Cannot reach Jasmin HTTP API", 503, {"endpoint": "/send", "error": str(exc)})
 
         body = resp.text.strip()
         if resp.status_code == 200 and body.startswith("Success"):
@@ -49,11 +51,11 @@ class SmsController:
             return SmsSendOut(message_id=msg_id)
 
         if resp.status_code == 412:
-            raise AppHttpException("No route found for the message", 422, {"jasmin": body})
+            raise AppHttpException("No route found for the message", 422, {"username": data.username, "destination": data.to})
         if resp.status_code == 403:
-            raise AppHttpException("Authentication failed or user quota exceeded", 403, {"jasmin": body})
+            raise AppHttpException("Authentication failed or user quota exceeded", 403, {"username": data.username})
 
-        raise AppHttpException(f"Jasmin rejected the message: {body}", 400, {"status": resp.status_code})
+        raise AppHttpException(f"Jasmin rejected the message: {body}", 400, {"username": data.username, "destination": data.to, "http_status": resp.status_code})
 
     async def send_binary(self, data: SmsBinaryRequest) -> SmsSendOut:
         params: dict = {
@@ -76,14 +78,14 @@ class SmsController:
         try:
             resp = await _http_client().get("/send", params=params)
         except httpx.RequestError as exc:
-            raise AppHttpException("Cannot reach Jasmin HTTP API", 503, {"detail": str(exc)})
+            raise AppHttpException("Cannot reach Jasmin HTTP API", 503, {"endpoint": "/send", "error": str(exc)})
 
         body = resp.text.strip()
         if resp.status_code == 200 and body.startswith("Success"):
             msg_id = body.split('"')[1] if '"' in body else body.replace("Success", "").strip()
             return SmsSendOut(message_id=msg_id)
 
-        raise AppHttpException(f"Jasmin rejected the message: {body}", 400, {"status": resp.status_code})
+        raise AppHttpException(f"Jasmin rejected the message: {body}", 400, {"username": data.username, "destination": data.to, "http_status": resp.status_code})
 
     async def rate(
         self,
@@ -102,11 +104,20 @@ class SmsController:
         try:
             resp = await _http_client().get("/rate", params=params)
         except httpx.RequestError as exc:
-            raise AppHttpException("Cannot reach Jasmin HTTP API", 503, {"detail": str(exc)})
+            raise AppHttpException("Cannot reach Jasmin HTTP API", 503, {"endpoint": "/rate", "error": str(exc)})
 
         body = resp.text.strip()
         if resp.status_code == 200:
-            # Jasmin rate response: "Success '0.0' 'cid'"
+            # Jasmin ≥ 0.10: JSON {"unit_rate": 0.05, "submit_sm_count": 1}
+            # Jasmin < 0.10:  text "Success '0.0' 'cid'"
+            try:
+                data = _json.loads(body)
+                return SmsRateOut(
+                    rate=float(data.get("unit_rate", 0.0)),
+                    connector_id=None,
+                )
+            except (_json.JSONDecodeError, ValueError):
+                pass
             parts = body.replace("'", "").split()
             rate_val = 0.0
             connector_id = None
@@ -119,33 +130,54 @@ class SmsController:
                 connector_id = parts[2]
             return SmsRateOut(rate=rate_val, connector_id=connector_id)
 
-        raise AppHttpException(f"Rate check failed: {body}", 400, {"status": resp.status_code})
+        if resp.status_code == 412:
+            raise AppHttpException("No route found for this destination", 422, {"username": username, "destination": to})
+        if resp.status_code == 403:
+            raise AppHttpException("Authentication failed or user quota exceeded", 403, {"username": username})
+        raise AppHttpException(f"Rate check failed: {body}", 400, {"username": username, "destination": to, "http_status": resp.status_code})
 
     async def balance(self, username: str, password: str) -> SmsBalanceOut:
         try:
             resp = await _http_client().get("/balance", params={"username": username, "password": password})
         except httpx.RequestError as exc:
-            raise AppHttpException("Cannot reach Jasmin HTTP API", 503, {"detail": str(exc)})
+            raise AppHttpException("Cannot reach Jasmin HTTP API", 503, {"endpoint": "/balance", "error": str(exc)})
 
         body = resp.text.strip()
-        if resp.status_code == 200 and body.startswith("Success"):
-            # Format: 'Success "balance sms_count"'  e.g. 'Success "100.0 500"' or 'Success "UD UD"'
-            inner = body.split('"')[1] if '"' in body else ""
-            parts = inner.split()
-            balance_val = None
-            sms_count_val = None
-            if len(parts) >= 1 and parts[0].upper() not in ("UD", "NONE", ""):
-                try:
-                    balance_val = float(parts[0])
-                except ValueError:
-                    pass
-            if len(parts) >= 2 and parts[1].upper() not in ("UD", "NONE", ""):
-                try:
-                    sms_count_val = int(parts[1])
-                except ValueError:
-                    pass
-            return SmsBalanceOut(balance=balance_val, sms_count=sms_count_val)
+        if resp.status_code == 200:
+            # Jasmin ≥ 0.10: JSON {"balance": 50.0, "sms_count": "ND"}
+            # Jasmin < 0.10:  text 'Success "100.0 500"'
+            try:
+                data = _json.loads(body)
+                raw_balance = data.get("balance")
+                raw_sms = data.get("sms_count")
+                balance_val = float(raw_balance) if raw_balance is not None and str(raw_balance).upper() not in ("ND", "NONE") else None
+                sms_count_val = None
+                if raw_sms is not None and str(raw_sms).upper() not in ("ND", "NONE"):
+                    try:
+                        sms_count_val = int(raw_sms)
+                    except (ValueError, TypeError):
+                        pass
+                return SmsBalanceOut(balance=balance_val, sms_count=sms_count_val)
+            except (_json.JSONDecodeError, ValueError):
+                pass
+            # Legacy text format
+            if body.startswith("Success"):
+                inner = body.split('"')[1] if '"' in body else ""
+                parts = inner.split()
+                balance_val = None
+                sms_count_val = None
+                if len(parts) >= 1 and parts[0].upper() not in ("UD", "NONE", ""):
+                    try:
+                        balance_val = float(parts[0])
+                    except ValueError:
+                        pass
+                if len(parts) >= 2 and parts[1].upper() not in ("UD", "NONE", ""):
+                    try:
+                        sms_count_val = int(parts[1])
+                    except ValueError:
+                        pass
+                return SmsBalanceOut(balance=balance_val, sms_count=sms_count_val)
 
         if resp.status_code == 403:
-            raise AppHttpException("Authentication failed", 403, {"jasmin": body})
-        raise AppHttpException(f"Balance check failed: {body}", 400, {"status": resp.status_code})
+            raise AppHttpException("Authentication failed", 403, {"username": username})
+        raise AppHttpException(f"Balance check failed: {body}", 400, {"username": username, "http_status": resp.status_code})

@@ -5,8 +5,11 @@ from app.core.jasmin_parsers import (
     parse_filter_show,
 )
 from app.core.jasmin_telnet import JasminTelnetSession, TelnetNotConnectedError
+from app.core.logger import get_logger
 from app.exceptions import AppHttpException
 from app.schemas.filters import FilterCreate, FilterOut, FilterUpdate
+
+logger = get_logger(__name__)
 
 
 def _telnet() -> JasminTelnetSession:
@@ -14,55 +17,44 @@ def _telnet() -> JasminTelnetSession:
 
 
 def _503(exc: TelnetNotConnectedError) -> None:
-    raise AppHttpException("Jasmin is not available", 503, {"detail": str(exc)})
+    raise AppHttpException("Jasmin is not available", 503, {"error": str(exc)})
 
 
-# Maps filter type → CLI flag for its main parameter
-_FILTER_PARAM_FLAGS: dict[str, str] = {
-    "ConnectorFilter": "-c",
-    "UserFilter": "-u",
-    "GroupFilter": "-g",
-    "SrcAddrFilter": "-r",
-    "DstAddrFilter": "-r",
-    "ShortMessageFilter": "-r",
-    "TagFilter": "-t",
+# Maps filter type → list of (param_key_in_schema, jcli_field_name) tuples
+# jcli field names must match exactly what Jasmin jcli expects.
+_FILTER_FIELDS: dict[str, list[tuple[str, str]]] = {
+    "TransparentFilter": [],
+    "ConnectorFilter": [("cid", "cid")],
+    "UserFilter": [("uid", "uid")],
+    "GroupFilter": [("gid", "gid")],
+    "SourceAddrFilter": [("source_addr", "source_addr")],
+    "DestinationAddrFilter": [("destination_addr", "destination_addr")],
+    "ShortMessageFilter": [("short_message", "short_message")],
+    "TagFilter": [("tag", "tag")],
+    # dateInterval / timeInterval: format "START;END" passed as a single value
+    "DateIntervalFilter": [("dateInterval", "dateInterval")],
+    "TimeIntervalFilter": [("timeInterval", "timeInterval")],
+    # pyCode: Python code string (not a file path)
+    "EvalPyFilter": [("pyCode", "pyCode")],
 }
 
 
-def _build_filter_add_cmd(data: FilterCreate | FilterUpdate, fid: str) -> str:
-    cmd = f"filter --add -f {fid} -t {data.type}"
+def _build_filter_fields(data: FilterCreate | FilterUpdate, fid: str) -> list[tuple[str, str]]:
+    """Build interactive fields for filter --add."""
+    fields: list[tuple[str, str]] = [
+        ("type", data.type),
+        ("fid", fid),
+    ]
     params = data.params or {}
-
-    flag = _FILTER_PARAM_FLAGS.get(data.type)
-    if flag:
-        main_param = params.get("regex") or params.get("connector") or params.get(
-            "uid") or params.get("gid") or params.get("tag")
-        if main_param:
-            cmd += f" {flag} {main_param}"
-
-    elif data.type == "DateIntervalFilter":
-        if "before_date" in params:
-            cmd += f" --before {params['before_date']}"
-        if "after_date" in params:
-            cmd += f" --after {params['after_date']}"
-
-    elif data.type == "TimeIntervalFilter":
-        if "before_time" in params:
-            cmd += f" --before {params['before_time']}"
-        if "after_time" in params:
-            cmd += f" --after {params['after_time']}"
-
-    elif data.type == "DayFilter":
-        days = params.get("days", [])
-        if days:
-            cmd += f" --days {','.join(str(d) for d in days)}"
-
-    elif data.type == "EvalPyFilter":
-        py_file = params.get("py_file") or params.get("script_path")
-        if py_file:
-            cmd += f" -y {py_file}"
-
-    return cmd
+    for param_key, jcli_key in _FILTER_FIELDS.get(data.type, []):
+        # Accept both the canonical key and the jcli key from params
+        val = params.get(param_key) or params.get(jcli_key)
+        if val is not None:
+            if isinstance(val, list):
+                fields.append((jcli_key, ",".join(str(v) for v in val)))
+            else:
+                fields.append((jcli_key, str(val)))
+    return fields
 
 
 class FiltersController:
@@ -72,67 +64,79 @@ class FiltersController:
             output = await _telnet().execute("filter --list")
         except TelnetNotConnectedError as exc:
             _503(exc)
+        logger.debug("filter --list raw output: %r", output)
         rows = parse_filter_list(output)
         return [FilterOut(**r) for r in rows]
 
     async def get_filter(self, fid: str) -> FilterOut:
         try:
-            output = await _telnet().execute(f"filter --show -f {fid}")
+            output = await _telnet().execute(f"filter -s {fid}")
         except TelnetNotConnectedError as exc:
             _503(exc)
-        if not output or "Error" in output or "Unknown" in output:
-            raise AppHttpException(f"Filter '{fid}' not found", 404)
-        return FilterOut(**parse_filter_show(output))
+        if not output or "Unknown" in output:
+            raise AppHttpException(f"Filter '{fid}' not found", 404, {"fid": fid})
+        parsed = parse_filter_show(output)
+        parsed["fid"] = fid
+        return FilterOut(**parsed)
 
     async def create_filter(self, data: FilterCreate) -> FilterOut:
-        cmd = _build_filter_add_cmd(data, data.fid)
+        fields = _build_filter_fields(data, data.fid)
         try:
-            output = await _telnet().execute(cmd, persist=True)
+            output = await _telnet().execute_interactive(
+                "filter --add",
+                fields,
+                persist=True,
+            )
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
             msg = extract_error_message(output)
             if "already" in msg.lower():
-                raise AppHttpException(f"Filter '{data.fid}' already exists", 409)
-            raise AppHttpException(msg, 400)
+                raise AppHttpException(f"Filter '{data.fid}' already exists", 409, {"fid": data.fid, "filter_type": data.type})
+            raise AppHttpException(msg, 400, {"fid": data.fid, "filter_type": data.type})
         return await self.get_filter(data.fid)
 
     async def update_filter(self, fid: str, data: FilterUpdate) -> FilterOut:
         # jcli has no filter --update; must delete + recreate
         existing = await self.get_filter(fid)
-        # Remove
         try:
-            del_out = await _telnet().execute(f"filter --remove -f {fid}")
+            del_out = await _telnet().execute(f"filter -r {fid}")
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(del_out):
-            raise AppHttpException(f"Failed to remove filter for update: {extract_error_message(del_out)}", 400)
-        # Recreate
+            raise AppHttpException(
+                f"Failed to remove filter for update: {extract_error_message(del_out)}", 400,
+                {"fid": fid, "filter_type": data.type},
+            )
         create_data = FilterCreate(fid=fid, type=data.type, params=data.params)
-        cmd = _build_filter_add_cmd(create_data, fid)
+        fields = _build_filter_fields(create_data, fid)
         try:
-            add_out = await _telnet().execute(cmd, persist=True)
+            add_out = await _telnet().execute_interactive(
+                "filter --add",
+                fields,
+                persist=True,
+            )
         except TelnetNotConnectedError as exc:
             # Attempt restore
-            restore_cmd = _build_filter_add_cmd(
-                FilterCreate(fid=fid, type=existing.type, params=existing.params), fid
+            restore = FilterCreate(fid=fid, type=existing.type, params=existing.params)
+            await _telnet().execute_interactive(
+                "filter --add", _build_filter_fields(restore, fid), persist=True
             )
-            await _telnet().execute(restore_cmd, persist=True)
             _503(exc)
         if not is_success(add_out):
             # Attempt restore
-            restore_cmd = _build_filter_add_cmd(
-                FilterCreate(fid=fid, type=existing.type, params=existing.params), fid
+            restore = FilterCreate(fid=fid, type=existing.type, params=existing.params)
+            await _telnet().execute_interactive(
+                "filter --add", _build_filter_fields(restore, fid), persist=True
             )
-            await _telnet().execute(restore_cmd, persist=True)
-            raise AppHttpException(extract_error_message(add_out), 400)
+            raise AppHttpException(extract_error_message(add_out), 400, {"fid": fid, "filter_type": create_data.type})
         return await self.get_filter(fid)
 
     async def delete_filter(self, fid: str) -> None:
         await self.get_filter(fid)
         try:
-            output = await _telnet().execute(f"filter --remove -f {fid}", persist=True)
+            output = await _telnet().execute(f"filter -r {fid}", persist=True)
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            raise AppHttpException(extract_error_message(output), 400)
+            raise AppHttpException(extract_error_message(output), 400, {"fid": fid})

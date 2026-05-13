@@ -1,48 +1,75 @@
-from app.core.jasmin_parsers import (
-    extract_error_message,
-    is_success,
-    parse_smppserver_show,
-)
-from app.core.jasmin_telnet import JasminTelnetSession, TelnetNotConnectedError
+"""
+SMPP Server configuration is managed via Jasmin's config file (/etc/jasmin/jasmin.cfg),
+not via jcli telnet. This controller reads the config file directly.
+Updates require editing the config file and restarting Jasmin; PATCH is not supported.
+"""
+
+import configparser
+import re
+
 from app.exceptions import AppHttpException
 from app.schemas.smpp_server import SmppServerOut, SmppServerUpdate
 
+_JASMIN_CFG = "/etc/jasmin/jasmin.cfg"
 
-def _telnet() -> JasminTelnetSession:
-    return JasminTelnetSession.get_instance()
+# Jasmin defaults for [smpp-server] section
+_DEFAULTS = {
+    "bind": "0.0.0.0",
+    "port": "2775",
+    "max_bindings": None,
+}
 
 
-def _503(exc: TelnetNotConnectedError) -> None:
-    raise AppHttpException("Jasmin is not available", 503, {"detail": str(exc)})
+def _read_smppserver_config() -> dict:
+    """Read [smpp-server] from jasmin.cfg.
+
+    configparser ignores commented-out lines, so uncommented values take
+    precedence; everything else falls back to Jasmin's built-in defaults.
+    """
+    cfg = configparser.ConfigParser()
+    cfg.read(_JASMIN_CFG)
+
+    section = cfg["smpp-server"] if "smpp-server" in cfg else {}
+
+    raw_port = section.get("port", _DEFAULTS["port"])
+    try:
+        port = int(raw_port)
+    except (ValueError, TypeError):
+        port = 2775
+
+    raw_max = section.get("max_bindings", None)
+    max_bindings: int | None = None
+    if raw_max is not None:
+        try:
+            max_bindings = int(raw_max)
+        except (ValueError, TypeError):
+            max_bindings = None
+
+    return {
+        "host": section.get("bind", _DEFAULTS["bind"]),
+        "port": port,
+        "max_bindings": max_bindings,
+    }
 
 
 class SmppServerController:
 
     async def get_config(self) -> SmppServerOut:
         try:
-            output = await _telnet().execute("smppserver --list")
-        except TelnetNotConnectedError as exc:
-            _503(exc)
-        if not output:
-            raise AppHttpException("Failed to retrieve SMPP server config", 500)
-        return SmppServerOut(**parse_smppserver_show(output))
+            data = _read_smppserver_config()
+        except Exception as exc:
+            raise AppHttpException(
+                "Failed to read SMPP server configuration",
+                500,
+                {"config_file": _JASMIN_CFG, "error": str(exc)},
+            ) from exc
+        return SmppServerOut(**data)
 
     async def update_config(self, data: SmppServerUpdate) -> SmppServerOut:
-        fields: list[tuple[str, str]] = []
-        if data.host is not None:
-            fields.append(("host", data.host))
-        if data.port is not None:
-            fields.append(("port", str(data.port)))
-        if data.max_bindings is not None:
-            fields.append(("max_bindings", str(data.max_bindings)))
-        if not fields:
-            return await self.get_config()
-        try:
-            output = await _telnet().execute_interactive(
-                "smppserver --update", fields, persist=True
-            )
-        except TelnetNotConnectedError as exc:
-            _503(exc)
-        if not is_success(output):
-            raise AppHttpException(extract_error_message(output), 400)
-        return await self.get_config()
+        # jcli does not expose smppserver management; config changes require
+        # editing jasmin.cfg and restarting Jasmin.
+        raise AppHttpException(
+            "SMPP server configuration cannot be updated via API. "
+            "Edit /etc/jasmin/jasmin.cfg and restart Jasmin.",
+            501,
+        )
