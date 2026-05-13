@@ -5,6 +5,7 @@ from app.routes.v1 import (
     filters,
     groups,
     http_connectors,
+    insights,
     mo_interceptors,
     mo_routes,
     mt_interceptors,
@@ -34,4 +35,5 @@ router.include_router(smpp_server.router)
 router.include_router(stats.router)
 router.include_router(system.router)
 router.include_router(sms.router)
+router.include_router(insights.router)
 router.include_router(test.router)
