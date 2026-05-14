@@ -352,16 +352,58 @@ def parse_httpccm_show(output: str) -> dict:
     }
 
 
+def _parse_filter_description_params(description: str) -> dict:
+    """Extract params from jcli filter description, e.g. '<U (uid=pbxsmpp)>'.
+
+    Handles patterns like:
+      <U (uid=value)>          → {uid: value}
+      <C (cid=value)>          → {cid: value}
+      <SA (source_addr=value)> → {source_addr: value}
+      <T>                      → {}  (TransparentFilter, no params)
+    Values may contain spaces (e.g. regex patterns), so we capture until ')'.
+    """
+    params: dict = {}
+    # Find all key=value pairs inside parentheses within angle brackets
+    for key, val in re.findall(r'(\w+)=([^)]+)', description):
+        params[key] = val.strip()
+    return params
+
+
 def parse_filter_list(output: str) -> list[dict]:
-    """Parse 'filter --list' — format: '#fid type routes description'."""
+    """Parse 'filter --list' — columns: fid, type, routes, description.
+
+    'Routes' can be multi-token (e.g. 'MO MT'). The description always starts
+    with '<', so we split on the first '<' to avoid misclassifying route tokens
+    as part of the description.
+    """
     filters = []
-    for row in _parse_hash_rows(output, skip_starts=("filter",)):
-        if not row:
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
             continue
+        content = line[1:]
+        # Skip the header row ('#Filter id  Type ...')
+        if re.match(r'filter\s+id', content, re.IGNORECASE):
+            continue
+        # Split at first '<': left side has fid+type+routes, right side is description
+        if "<" in content:
+            left, _, right = content.partition("<")
+            description = ("<" + right).strip()
+        else:
+            left = content
+            description = ""
+        parts = left.split()
+        if len(parts) < 2:
+            continue
+        fid = parts[0]
+        type_ = parts[1]
+        routes = " ".join(parts[2:]).strip()
         filters.append({
-            "fid": row[0],
-            "type": row[1] if len(row) > 1 else "",
-            "params": {},
+            "fid": fid,
+            "type": type_,
+            "routes": routes,
+            "description": description,
+            "params": _parse_filter_description_params(description),
         })
     return filters
 

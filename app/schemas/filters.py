@@ -68,4 +68,6 @@ class FilterUpdate(BaseModel):
 class FilterOut(BaseModel):
     fid: str
     type: str
+    routes: str = ""
+    description: str = ""
     params: dict[str, Any] = {}
