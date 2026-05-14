@@ -1,6 +1,8 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FieldValidationInfo, field_validator
+
+from app.utils.validators import validate_identifier, validate_no_control_chars
 
 # SMPP connectors represent outbound connections from Jasmin to an SMSC (carrier/aggregator).
 # Jasmin uses these to deliver MT (mobile-terminated) messages to the carrier.
@@ -14,9 +16,27 @@ class SmppConnectorCreate(BaseModel):
         max_length=64,
         description=(
             "Unique connector ID. Used to reference this connector in routes. "
+            "Only letters, digits, underscores and hyphens allowed. "
             "Example: \"carrier_mx\""
         ),
     )
+
+    @field_validator("cid")
+    @classmethod
+    def validate_cid(cls, v: str) -> str:
+        return validate_identifier(v, "cid")
+
+    @field_validator("host", "username", "password")
+    @classmethod
+    def validate_string_fields(cls, v: str, info: FieldValidationInfo) -> str:
+        return validate_no_control_chars(v, info.field_name)
+
+    @field_validator("system_type", "address_range")
+    @classmethod
+    def validate_optional_string_fields(cls, v: str | None, info: FieldValidationInfo) -> str | None:
+        if v is not None:
+            return validate_no_control_chars(v, info.field_name)
+        return v
     host: str = Field(
         ...,
         description="SMSC hostname or IP address. Example: \"smpp.carrier.com\"",
@@ -143,6 +163,13 @@ class SmppConnectorUpdate(BaseModel):
     system_type: str | None = Field(default=None, max_length=12, description="New system_type.")
     interface_version: Literal["33", "34"] | None = Field(default=None, description="New SMPP version.")
     address_range: str | None = Field(default=None, max_length=40, description="New address range.")
+
+    @field_validator("host", "username", "password", "system_type", "address_range")
+    @classmethod
+    def validate_string_fields(cls, v: str | None, info: FieldValidationInfo) -> str | None:
+        if v is not None:
+            return validate_no_control_chars(v, info.field_name)
+        return v
     source_addr_ton: int | None = Field(default=None, ge=0, le=6, description="New source TON.")
     source_addr_npi: int | None = Field(default=None, ge=0, le=18, description="New source NPI.")
     dest_addr_ton: int | None = Field(default=None, ge=0, le=6, description="New destination TON.")

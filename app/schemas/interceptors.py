@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.utils.validators import validate_no_control_chars, validate_identifier
+
 # Interceptors run Python scripts on every message before routing.
 # The script file is saved to JASMIN_SCRIPTS_DIR and referenced with python3(path) syntax.
 # Scripts must be valid Python modules (no bare `return` at module level).
@@ -47,6 +49,13 @@ class MtInterceptorCreate(BaseModel):
         ),
     )
 
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: list[str]) -> list[str]:
+        for item in v:
+            validate_identifier(item, "filters item")
+        return v
+
     @field_validator("script")
     @classmethod
     def valid_python(cls, v: str) -> str:
@@ -69,6 +78,14 @@ class MtInterceptorUpdate(BaseModel):
             "If the script file was deleted, this field becomes required."
         ),
     )
+
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for item in v:
+                validate_identifier(item, "filters item")
+        return v
 
     @field_validator("script")
     @classmethod
@@ -113,6 +130,13 @@ class MoInterceptorCreate(BaseModel):
         ),
     )
 
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: list[str]) -> list[str]:
+        for item in v:
+            validate_identifier(item, "filters item")
+        return v
+
     @field_validator("script")
     @classmethod
     def valid_python(cls, v: str) -> str:
@@ -129,6 +153,14 @@ class MoInterceptorUpdate(BaseModel):
         default=None,
         description="New Python script source. If omitted, reuses the existing script on disk.",
     )
+
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for item in v:
+                validate_identifier(item, "filters item")
+        return v
 
     @field_validator("script")
     @classmethod

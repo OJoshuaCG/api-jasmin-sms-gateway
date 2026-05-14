@@ -1,6 +1,8 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.utils.validators import validate_no_control_chars
 
 # Routes define how messages are dispatched to connectors.
 # MT routes: outbound — from Jasmin to an SMSC via an SMPP connector.
@@ -70,6 +72,20 @@ class MtRouteCreate(BaseModel):
         ),
     )
 
+    @field_validator("connectors")
+    @classmethod
+    def validate_connectors(cls, v: list[str]) -> list[str]:
+        for item in v:
+            validate_no_control_chars(item, "connectors")
+        return v
+
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: list[str]) -> list[str]:
+        for item in v:
+            validate_no_control_chars(item, "filters")
+        return v
+
 
 class MtRouteUpdate(BaseModel):
     # Route has no update command in Jasmin; it is deleted and recreated internally.
@@ -86,6 +102,22 @@ class MtRouteUpdate(BaseModel):
         ),
     )
     rate: float | None = Field(default=None, description="New per-message cost.")
+
+    @field_validator("connectors")
+    @classmethod
+    def validate_connectors(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for item in v:
+                validate_no_control_chars(item, "connectors")
+        return v
+
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for item in v:
+                validate_no_control_chars(item, "filters")
+        return v
 
 
 class MtRouteOut(BaseModel):
@@ -125,6 +157,18 @@ class MoRouteCreate(BaseModel):
         ),
     )
 
+    @field_validator("connector")
+    @classmethod
+    def validate_connector(cls, v: str) -> str:
+        return validate_no_control_chars(v, "connector")
+
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: list[str]) -> list[str]:
+        for item in v:
+            validate_no_control_chars(item, "filters")
+        return v
+
 
 class MoRouteUpdate(BaseModel):
     connector: str | None = Field(
@@ -138,6 +182,21 @@ class MoRouteUpdate(BaseModel):
             "and connector is being changed."
         ),
     )
+
+    @field_validator("connector")
+    @classmethod
+    def validate_connector(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_control_chars(v, "connector")
+        return v
+
+    @field_validator("filters")
+    @classmethod
+    def validate_filters(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for item in v:
+                validate_no_control_chars(item, "filters")
+        return v
 
 
 class MoRouteOut(BaseModel):

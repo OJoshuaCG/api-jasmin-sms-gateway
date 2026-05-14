@@ -1,6 +1,8 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.utils.validators import validate_identifier, validate_no_control_chars
 
 # HTTP connectors represent outbound HTTP endpoints for MO (mobile-originated) message delivery.
 # Jasmin calls these URLs when a message is received from an SMSC and matched by a MO route.
@@ -14,9 +16,21 @@ class HttpConnectorCreate(BaseModel):
         max_length=64,
         description=(
             "Unique connector ID. Referenced in MO routes. "
+            "Only letters, digits, underscores and hyphens allowed. "
             "Example: \"webhook_crm\""
         ),
     )
+
+    @field_validator("cid")
+    @classmethod
+    def validate_cid(cls, v: str) -> str:
+        return validate_identifier(v, "cid")
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        return validate_no_control_chars(v, "url")
+
     url: str = Field(
         ...,
         description=(
@@ -36,6 +50,13 @@ class HttpConnectorCreate(BaseModel):
 class HttpConnectorUpdate(BaseModel):
     url: str | None = Field(default=None, description="New delivery URL.")
     method: Literal["GET", "POST"] | None = Field(default=None, description="New HTTP method.")
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_control_chars(v, "url")
+        return v
 
 
 class HttpConnectorOut(BaseModel):

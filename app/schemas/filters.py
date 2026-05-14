@@ -1,6 +1,8 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.utils.validators import validate_identifier, validate_no_control_chars
 
 # Filters are reusable conditions attached to routes and interceptors.
 # They decide which messages a route/interceptor handles.
@@ -41,9 +43,24 @@ class FilterCreate(BaseModel):
         max_length=64,
         description=(
             "Unique filter identifier. Referenced by routes and interceptors. "
+            "Only letters, digits, underscores and hyphens allowed. "
             "Example: \"filter_kenya_src\""
         ),
     )
+
+    @field_validator("fid")
+    @classmethod
+    def validate_fid(cls, v: str) -> str:
+        return validate_identifier(v, "fid")
+
+    @field_validator("params")
+    @classmethod
+    def validate_params(cls, v: dict[str, Any]) -> dict[str, Any]:
+        for key, val in v.items():
+            if isinstance(val, str):
+                validate_no_control_chars(val, f"params.{key}")
+        return v
+
     type: FilterType = Field(
         ...,
         description="Filter type. Determines which message attribute is inspected.",
@@ -63,6 +80,14 @@ class FilterUpdate(BaseModel):
         default={},
         description="New parameters for the updated filter type.",
     )
+
+    @field_validator("params")
+    @classmethod
+    def validate_params(cls, v: dict[str, Any]) -> dict[str, Any]:
+        for key, val in v.items():
+            if isinstance(val, str):
+                validate_no_control_chars(val, f"params.{key}")
+        return v
 
 
 class FilterOut(BaseModel):

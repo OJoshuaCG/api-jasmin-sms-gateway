@@ -1,6 +1,6 @@
-import re
-
 from pydantic import BaseModel, Field, field_validator
+
+from app.utils.validators import validate_identifier, validate_no_control_chars
 
 
 class UserCreate(BaseModel):
@@ -34,11 +34,28 @@ class UserCreate(BaseModel):
         description="Password for SMPP bind and HTTP API authentication.",
     )
 
-    @field_validator("uid", "gid", "username")
+    @field_validator("uid", "gid")
     @classmethod
-    def no_spaces(cls, v: str) -> str:
-        if " " in v:
+    def validate_identifiers(cls, v: str) -> str:
+        return validate_identifier(v, "field")
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if ' ' in v:
             raise ValueError("must not contain spaces")
+        return validate_no_control_chars(v, "username")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_no_control_chars(v, "password")
+
+    @field_validator("mt_filter_src_addr", "mt_filter_dst_addr", "mt_filter_content")
+    @classmethod
+    def validate_mt_filters(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_control_chars(v, "filter")
         return v
 
     # Throughput limits (messages/second). None = unlimited.
@@ -141,6 +158,36 @@ class UserUpdate(BaseModel):
     username: str | None = Field(default=None, description="Change login username.")
     password: str | None = Field(default=None, description="Change password.")
     mt_throughput: float | None = Field(default=None, description="Update MT throughput limit.")
+
+    @field_validator("gid")
+    @classmethod
+    def validate_gid(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_identifier(v, "gid")
+        return v
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str | None) -> str | None:
+        if v is not None:
+            if ' ' in v:
+                raise ValueError("must not contain spaces")
+            return validate_no_control_chars(v, "username")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_control_chars(v, "password")
+        return v
+
+    @field_validator("mt_filter_src_addr", "mt_filter_dst_addr", "mt_filter_content")
+    @classmethod
+    def validate_mt_filters(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_control_chars(v, "filter")
+        return v
     mo_throughput: float | None = Field(default=None, description="Update MO throughput limit.")
     balance: float | None = Field(default=None, description="Update credit balance.")
     sms_count: int | None = Field(default=None, description="Update SMS quota.")
