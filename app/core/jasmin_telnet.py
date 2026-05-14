@@ -263,6 +263,17 @@ class JasminTelnetSession:
     #  Command execution
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _sanitize(value: str) -> str:
+        """Strip CR, LF and NUL from any value before writing it to the telnet socket.
+
+        This is a last-resort defense against command injection via field values
+        in interactive jcli sessions. Schema validators are the first line of defense;
+        this function ensures the wire never receives control characters regardless
+        of where the value originated.
+        """
+        return value.replace('\r', '').replace('\n', '').replace('\x00', '')
+
     def _handle_io_error(self, exc: Exception) -> None:
         """Mark disconnected, schedule reconnect, then raise TelnetNotConnectedError."""
         self._connected = False
@@ -280,7 +291,7 @@ class JasminTelnetSession:
             if not self._connected:
                 raise TelnetNotConnectedError("Jasmin jcli is not connected")
             try:
-                self._writer.write((command + "\r\n").encode())
+                self._writer.write((self._sanitize(command) + "\r\n").encode())
                 await self._writer.drain()
                 response = await self._read_until(_MAIN_PROMPT)
                 response = self._strip_prompt(response)
@@ -312,7 +323,7 @@ class JasminTelnetSession:
             if not self._connected:
                 raise TelnetNotConnectedError("Jasmin jcli is not connected")
             try:
-                self._writer.write((command + "\r\n").encode())
+                self._writer.write((self._sanitize(command) + "\r\n").encode())
                 await self._writer.drain()
 
                 content, matched = await self._read_until_one_of(_ALL_PROMPTS)
@@ -322,9 +333,11 @@ class JasminTelnetSession:
                 if not self._is_interactive_match(matched):
                     return content.strip()
 
-                # Interactive mode: send each field assignment
+                # Interactive mode: send each field assignment.
+                # _sanitize() strips CR/LF/NUL as a final defense layer — schema
+                # validators are the first line of defense, this protects the wire.
                 for key, value in fields:
-                    self._writer.write(f"{key} {value}\r\n".encode())
+                    self._writer.write(f"{key} {self._sanitize(str(value))}\r\n".encode())
                     await self._writer.drain()
                     _content, next_match = await self._read_until_one_of(_ALL_PROMPTS)
                     # If jcli exited interactive mode early (validation error, etc.)

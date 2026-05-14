@@ -75,7 +75,8 @@ DB_ENGINE = os.getenv("DB_ENGINE", "sqlite")
 JASMIN_TELNET_HOST = os.getenv("JASMIN_TELNET_HOST", "localhost")
 JASMIN_TELNET_PORT = int(os.getenv("JASMIN_TELNET_PORT", "8990"))
 JASMIN_TELNET_USER = os.getenv("JASMIN_TELNET_USER", "jcliadmin")
-JASMIN_TELNET_PASSWORD = os.getenv("JASMIN_TELNET_PASSWORD", "jclipwd")
+_JASMIN_TELNET_PASSWORD_RAW = os.getenv("JASMIN_TELNET_PASSWORD")
+JASMIN_TELNET_PASSWORD = _JASMIN_TELNET_PASSWORD_RAW if _JASMIN_TELNET_PASSWORD_RAW is not None else "jclipwd"
 JASMIN_TELNET_TIMEOUT = int(os.getenv("JASMIN_TELNET_TIMEOUT", "10"))
 
 # ======= Jasmin HTTP API variables ======= #
@@ -87,13 +88,14 @@ ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
 JASMIN_SCRIPTS_DIR = os.getenv("JASMIN_SCRIPTS_DIR", "/etc/jasmin/scripts")
 
 # ======= Startup validation ======= #
+import logging as _logging
+
 if not SECRET_KEY:
     if APP_ENV == "production":
         raise ValueError(
             "SECRET_KEY no está definido. "
             "Establece la variable de entorno SECRET_KEY antes de iniciar en producción."
         )
-    import logging as _logging
     _logging.warning(
         "SECRET_KEY no está definido. Define SECRET_KEY en tu .env para evitar este aviso."
     )
@@ -105,8 +107,19 @@ if not ADMIN_API_KEY:
             'Genera una clave con: python -c "import secrets; print(secrets.token_urlsafe(32))" '
             "y establécela como variable de entorno ADMIN_API_KEY."
         )
-    import logging as _logging
     _logging.warning(
         "ADMIN_API_KEY no está definido. Todos los endpoints de la API devolverán 500. "
         "Define ADMIN_API_KEY en tu .env."
     )
+
+if APP_ENV == "production":
+    if _JASMIN_TELNET_PASSWORD_RAW is None:
+        raise ValueError(
+            "JASMIN_TELNET_PASSWORD no está definido. "
+            "Define JASMIN_TELNET_PASSWORD en producción."
+        )
+    if CORS_ORIGINS == ["*"]:
+        _logging.warning(
+            "CORS_ORIGINS está configurado como '*' (permite cualquier origen). "
+            "Considera restringirlo a los dominios autorizados en producción."
+        )

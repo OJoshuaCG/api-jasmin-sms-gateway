@@ -114,10 +114,15 @@ def create_versioned_app(
     if LOGGER_MIDDLEWARE_ENABLED:
         versioned.add_middleware(LoggerMiddleware)
     versioned.add_middleware(ContextMiddleware)
+    # CORS spec forbids allow_credentials=True with wildcard origins.
+    # Browsers reject responses that combine both — credentials are only sent
+    # when origins are explicit. Use wildcard only in API-to-API scenarios
+    # where browsers are not involved.
+    _allow_credentials = CORS_ORIGINS != ["*"]
     versioned.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
-        allow_credentials=True,
+        allow_credentials=_allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )

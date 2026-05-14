@@ -1,6 +1,29 @@
 import logging
+import re
 
 from app.core.environments import APP_NAME, LOGGER_LEVEL
+
+_SENSITIVE_QS_PARAMS = re.compile(r'(?i)(?<=[?&])password=[^&\s"]*')
+
+
+class _SensitiveDataFilter(logging.Filter):
+    """Strips password values from uvicorn access log lines that contain raw URLs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.getMessage and isinstance(record.args, tuple):
+            record.args = tuple(
+                _SENSITIVE_QS_PARAMS.sub("password=***", str(a)) if isinstance(a, str) else a
+                for a in record.args
+            )
+        return True
+
+
+def _apply_sensitive_filter() -> None:
+    """Attach the filter to uvicorn access loggers so query-string passwords are redacted."""
+    for logger_name in ("uvicorn.access", "uvicorn"):
+        lg = logging.getLogger(logger_name)
+        if not any(isinstance(f, _SensitiveDataFilter) for f in lg.filters):
+            lg.addFilter(_SensitiveDataFilter())
 
 
 def get_logger(
@@ -31,4 +54,5 @@ def get_logger(
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 
+    _apply_sensitive_filter()
     return logger
