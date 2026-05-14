@@ -1,4 +1,5 @@
 import time
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -17,6 +18,18 @@ logger = get_logger()
 
 _SENSITIVE_PATHS = {"/user/login"}
 _REDACTED_HEADERS = {"x-api-key", "authorization", "cookie", "set-cookie"}
+# Query params that must never appear in logs (e.g. Jasmin user passwords on SMS endpoints)
+_REDACTED_QUERY_PARAMS = {"password"}
+
+
+def _redact_query_params(query_string: str) -> str:
+    """Replace sensitive query param values with *** before logging."""
+    parts = parse_qsl(query_string, keep_blank_values=True)
+    redacted = [
+        (k, "***" if k.lower() in _REDACTED_QUERY_PARAMS else v)
+        for k, v in parts
+    ]
+    return urlencode(redacted)
 
 
 class LoggerMiddleware(BaseHTTPMiddleware):
@@ -26,7 +39,8 @@ class LoggerMiddleware(BaseHTTPMiddleware):
 
         method = request.method
         path = request.url.path
-        query_string = request.url.query or None
+        raw_query = request.url.query or None
+        query_string = _redact_query_params(raw_query) if raw_query else None
         headers = {
             k: ("***" if k.lower() in _REDACTED_HEADERS else v)
             for k, v in request.headers.items()
