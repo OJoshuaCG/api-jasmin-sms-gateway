@@ -55,7 +55,8 @@ class SmsController:
         if resp.status_code == 403:
             raise AppHttpException("Authentication failed or user quota exceeded", 403, {"username": data.username})
 
-        raise AppHttpException(f"Jasmin rejected the message: {body}", 400, {"username": data.username, "destination": data.to, "http_status": resp.status_code})
+        # body is NOT forwarded — Jasmin may echo back request params (passwords) in error text
+        raise AppHttpException("Jasmin rejected the message", 400, {"username": data.username, "destination": data.to, "http_status": resp.status_code})
 
     async def send_binary(self, data: SmsBinaryRequest) -> SmsSendOut:
         params: dict = {
@@ -85,7 +86,7 @@ class SmsController:
             msg_id = body.split('"')[1] if '"' in body else body.replace("Success", "").strip()
             return SmsSendOut(message_id=msg_id)
 
-        raise AppHttpException(f"Jasmin rejected the message: {body}", 400, {"username": data.username, "destination": data.to, "http_status": resp.status_code})
+        raise AppHttpException("Jasmin rejected the message", 400, {"username": data.username, "destination": data.to, "http_status": resp.status_code})
 
     async def rate(
         self,
@@ -134,7 +135,7 @@ class SmsController:
             raise AppHttpException("No route found for this destination", 422, {"username": username, "destination": to})
         if resp.status_code == 403:
             raise AppHttpException("Authentication failed or user quota exceeded", 403, {"username": username})
-        raise AppHttpException(f"Rate check failed: {body}", 400, {"username": username, "destination": to, "http_status": resp.status_code})
+        raise AppHttpException("Rate check failed", 400, {"username": username, "destination": to, "http_status": resp.status_code})
 
     async def balance(self, username: str, password: str) -> SmsBalanceOut:
         try:
@@ -180,4 +181,4 @@ class SmsController:
 
         if resp.status_code == 403:
             raise AppHttpException("Authentication failed", 403, {"username": username})
-        raise AppHttpException(f"Balance check failed: {body}", 400, {"username": username, "http_status": resp.status_code})
+        raise AppHttpException("Balance check failed", 400, {"username": username, "http_status": resp.status_code})
