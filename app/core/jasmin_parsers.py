@@ -241,6 +241,7 @@ def parse_user_show(output: str) -> dict:
     mt_quota = nested.get("mt_messaging_cred", {}).get("quota", {})
     mt_auth = nested.get("mt_messaging_cred", {}).get("authorization", {})
     mt_vf = nested.get("mt_messaging_cred", {}).get("valuefilter", {})
+    mt_dv = nested.get("mt_messaging_cred", {}).get("defaultvalue", {})
     smpps_auth = nested.get("smpps_cred", {}).get("authorization", {})
     smpps_quota = nested.get("smpps_cred", {}).get("quota", {})
 
@@ -252,23 +253,42 @@ def parse_user_show(output: str) -> dict:
         "gid": top.get("gid", ""),
         "username": top.get("username", ""),
         "enabled": True,  # not exposed in user -s; updated via enable/disable
+
+        # MT Quota — all under mt_messaging_cred quota
         "mt_throughput": parse_float_nullable(g(mt_quota, "http_throughput")),
-        "mo_throughput": parse_float_nullable(g(mt_quota, "smpps_throughput")),
+        "smpps_throughput": parse_float_nullable(g(mt_quota, "smpps_throughput")),
         "balance": parse_float_nullable(g(mt_quota, "balance")),
         "sms_count": parse_int_nullable(g(mt_quota, "sms_count")),
+        "mt_quota_early_percent": parse_float_nullable(g(mt_quota, "early_percent")),
+
+        # MT Auth — all under mt_messaging_cred authorization
+        "mt_auth_http_send": parse_bool(g(mt_auth, "http_send", "True")),
+        "mt_auth_http_balance": parse_bool(g(mt_auth, "http_balance", "True")),
+        "mt_auth_http_rate": parse_bool(g(mt_auth, "http_rate", "True")),
+        "mt_auth_http_bulk": parse_bool(g(mt_auth, "http_bulk", "False")),
+        "mt_auth_smpps_send": parse_bool(g(mt_auth, "smpps_send", "True")),
+        "mt_auth_long_content": parse_bool(g(mt_auth, "http_long_content", "True")),
+        "mt_auth_dlr_level": parse_bool(g(mt_auth, "dlr_level", "True")),
+        "mt_auth_http_dlr_method": parse_bool(g(mt_auth, "http_dlr_method", "True")),
+        "mt_auth_src_addr": parse_bool(g(mt_auth, "src_addr", "True")),
         "mt_auth_priority": parse_bool(g(mt_auth, "priority", "True")),
         "mt_auth_validity_period": parse_bool(g(mt_auth, "validity_period", "True")),
-        "mt_auth_src_addr": parse_bool(g(mt_auth, "src_addr", "True")),
         "mt_auth_schedule_at": parse_bool(g(mt_auth, "schedule_delivery_time", "True")),
-        "mt_auth_dlr_level": parse_bool(g(mt_auth, "dlr_level", "True")),
-        "mt_auth_long_content": parse_bool(g(mt_auth, "http_long_content", "True")),
+        "mt_auth_hex_content": parse_bool(g(mt_auth, "hex_content", "True")),
+
+        # MT Value Filters — all under mt_messaging_cred valuefilter
         "mt_filter_src_addr": parse_nullable(g(mt_vf, "src_addr", "None")),
         "mt_filter_dst_addr": parse_nullable(g(mt_vf, "dst_addr", "None")),
         "mt_filter_content": parse_nullable(g(mt_vf, "content", "None")),
+        "mt_filter_priority": parse_nullable(g(mt_vf, "priority", "None")),
+        "mt_filter_validity_period": parse_nullable(g(mt_vf, "validity_period", "None")),
+
+        # MT Default Values — under mt_messaging_cred defaultvalue
+        "mt_default_src_addr": parse_nullable(g(mt_dv, "src_addr", "None")),
+
+        # SMPP Server creds — under smpps_cred
         "smpps_allow_bind": parse_bool(g(smpps_auth, "bind", "True")),
         "smpps_max_bindings": parse_int_nullable(g(smpps_quota, "max_bindings")),
-        "smpps_quota_sms_count": parse_int_nullable(g(smpps_quota, "quota_sms_count")),
-        "smpps_throughput": parse_float_nullable(g(smpps_quota, "smpps_throughput")),
     }
 
 

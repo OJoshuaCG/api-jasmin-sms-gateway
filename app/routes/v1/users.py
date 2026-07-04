@@ -22,7 +22,7 @@ async def list_users():
     - `username` — login name for SMPP and HTTP API
     - `enabled` — whether the user can send messages
     - `balance` / `sms_count` — prepaid credit; `null` = unlimited
-    - `mt_throughput` / `mo_throughput` — messages/second limits; `null` = unlimited
+    - `mt_throughput` / `smpps_throughput` — messages/second limits; `null` = unlimited
     - `mt_auth_*` — authorization flags (priority, src address override, etc.)
     - `mt_filter_*` — regex filters applied before routing
     - `smpps_*` — SMPP server (inbound bind) settings
@@ -68,14 +68,13 @@ async def create_user(body: UserCreate):
       "balance": 100.0,
       "sms_count": 500,
       "mt_throughput": 10.0,
-      "mo_throughput": null,
+      "smpps_throughput": 5.0,
       "mt_auth_src_addr": true,
       "mt_auth_long_content": true,
       "mt_filter_src_addr": "^254",
       "mt_filter_dst_addr": null,
       "smpps_allow_bind": true,
-      "smpps_max_bindings": 2,
-      "smpps_throughput": 5.0
+      "smpps_max_bindings": 2
     }
     ```
 
@@ -85,21 +84,30 @@ async def create_user(body: UserCreate):
     |---|---|---|
     | `balance` | unlimited | Prepaid credit balance (decremented per message) |
     | `sms_count` | unlimited | Max total MT messages allowed |
+    | `mt_quota_early_percent` | unlimited | Early quota warning threshold (%) |
     | `mt_throughput` | unlimited | Max MT msg/sec via HTTP API |
-    | `mo_throughput` | unlimited | Max MO msg/sec |
-    | `mt_auth_priority` | `true` | Allow user to set message priority |
-    | `mt_auth_validity_period` | `true` | Allow user to set validity period |
+    | `smpps_throughput` | unlimited | Max MT msg/sec via SMPP server |
+    | `mt_auth_http_send` | `true` | Allow sending via HTTP API |
+    | `mt_auth_http_balance` | `true` | Allow balance check via HTTP |
+    | `mt_auth_http_rate` | `true` | Allow rate check via HTTP |
+    | `mt_auth_http_bulk` | `false` | Allow bulk send via HTTP |
+    | `mt_auth_smpps_send` | `true` | Allow sending via SMPP server |
+    | `mt_auth_priority` | `true` | Allow setting message priority |
+    | `mt_auth_validity_period` | `true` | Allow setting validity period |
     | `mt_auth_src_addr` | `true` | Allow custom sender ID |
     | `mt_auth_schedule_at` | `true` | Allow scheduled delivery |
     | `mt_auth_dlr_level` | `true` | Allow DLR level selection |
+    | `mt_auth_http_dlr_method` | `true` | Allow DLR callback method selection |
     | `mt_auth_long_content` | `true` | Allow long (multipart) SMS via HTTP |
+    | `mt_auth_hex_content` | `true` | Allow hex-encoded message content |
     | `mt_filter_src_addr` | `null` | Regex source address must match |
     | `mt_filter_dst_addr` | `null` | Regex destination must match |
     | `mt_filter_content` | `null` | Regex message text must match |
+    | `mt_filter_priority` | `null` | Regex priority value must match |
+    | `mt_filter_validity_period` | `null` | Regex validity period must match |
+    | `mt_default_src_addr` | `null` | Default source address when none provided |
     | `smpps_allow_bind` | `true` | Allow SMPP inbound bind |
     | `smpps_max_bindings` | unlimited | Max simultaneous SMPP binds |
-    | `smpps_quota_sms_count` | unlimited | Max messages via SMPP server |
-    | `smpps_throughput` | unlimited | Max msg/sec via SMPP server |
 
     Returns **404** if the referenced `gid` does not exist.
     Returns **409** if a user with the same `uid` already exists.
