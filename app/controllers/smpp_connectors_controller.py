@@ -81,6 +81,35 @@ def _connector_fields(data: SmppConnectorCreate | SmppConnectorUpdate) -> list[t
     if getattr(data, "reconnect_on_connection_failure_delay", None) is not None:
         fields.append(("con_fail_delay", str(data.reconnect_on_connection_failure_delay)))
 
+    # bind_timeout → jcli "bind_to" (integer, seconds) — distinct from bind type
+    if getattr(data, "bind_timeout", None) is not None:
+        fields.append(("bind_to", str(data.bind_timeout)))
+
+    # Timeouts
+    for attr, jcli_key in [
+        ("elink_interval", "elink_interval"),
+        ("res_to", "res_to"),
+        ("pdu_red_to", "pdu_red_to"),
+        ("trx_to", "trx_to"),
+        ("requeue_delay", "requeue_delay"),
+    ]:
+        val = getattr(data, attr, None)
+        if val is not None:
+            fields.append((jcli_key, str(val)))
+
+    # Encoding / DLR
+    for attr, jcli_key in [
+        ("coding", "coding"),
+        ("dlr_msgid", "dlr_msgid"),
+    ]:
+        val = getattr(data, attr, None)
+        if val is not None:
+            fields.append((jcli_key, str(val)))
+
+    # TLS — yes/no
+    if getattr(data, "ssl", None) is not None:
+        fields.append(("ssl", _bool_to_yn(data.ssl)))
+
     return fields
 
 

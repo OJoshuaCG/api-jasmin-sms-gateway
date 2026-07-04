@@ -63,10 +63,9 @@ class SmppConnectorCreate(BaseModel):
     bind_to: Literal["transceiver", "transmitter", "receiver"] = Field(
         default="transceiver",
         description=(
-            "SMPP bind type. "
+            "SMPP bind type (jcli key: 'bind'). "
             "transceiver: send and receive (recommended). "
-            "transmitter: send only. "
-            "receiver: receive only."
+            "transmitter: send only. receiver: receive only."
         ),
     )
     system_type: str | None = Field(
@@ -76,10 +75,6 @@ class SmppConnectorCreate(BaseModel):
             "SMPP system_type field sent during bind. Carrier-specific, often empty. "
             "Example: \"OTA\""
         ),
-    )
-    interface_version: Literal["33", "34"] = Field(
-        default="34",
-        description="SMPP protocol version. 34 = SMPP 3.4 (recommended). 33 = SMPP 3.3.",
     )
     address_range: str | None = Field(
         default=None,
@@ -135,22 +130,31 @@ class SmppConnectorCreate(BaseModel):
             "None = Jasmin default. Example: 86400 (24 hours)"
         ),
     )
-    reconnect_on_connection_loss: bool | None = Field(
-        default=None,
-        description="Auto-reconnect if the SMPP session drops. Default: True.",
+    reconnect_on_connection_loss: bool | None = Field(default=None, description="Auto-reconnect if the SMPP session drops. Default: True.")
+    reconnect_on_connection_loss_delay: int | None = Field(default=None, description="Seconds to wait before reconnecting after a session drop. Default: 10.")
+    reconnect_on_connection_failure: bool | None = Field(default=None, description="Auto-retry if the initial connection fails. Default: True.")
+    reconnect_on_connection_failure_delay: int | None = Field(default=None, description="Seconds to wait before retrying a failed connection. Default: 10.")
+
+    # Connection timeouts (jcli keys confirmed via smppccm -s and interactive probe)
+    bind_timeout: int | None = Field(default=None, ge=0, description="Bind request timeout in seconds (jcli: bind_to). Default: 30.")
+    elink_interval: int | None = Field(default=None, ge=0, description="Enquire-link keepalive interval in seconds. Default: 30.")
+    res_to: int | None = Field(default=None, ge=0, description="Response timeout in seconds. Default: 120.")
+    pdu_red_to: int | None = Field(default=None, ge=0, description="PDU inactivity redirect timeout in seconds. Default: 10.")
+    trx_to: int | None = Field(default=None, ge=0, description="TRX session inactivity timeout in seconds. Default: 300.")
+    requeue_delay: int | None = Field(default=None, ge=0, description="Seconds to wait before re-queueing a failed message. Default: 120.")
+
+    # Message encoding / routing
+    coding: int | None = Field(
+        default=None, ge=0, le=255,
+        description="Data coding scheme. 0=default GSM7, 1=IA5/ASCII, 3=Latin-1, 8=UCS-2. Default: 0.",
     )
-    reconnect_on_connection_loss_delay: int | None = Field(
-        default=None,
-        description="Seconds to wait before reconnecting after a session drop. Default: 10.",
+    dlr_msgid: int | None = Field(
+        default=None, ge=0, le=2,
+        description="Which PDU field carries the message ID in DLR receipts. 0=smpp msgid, 1=receipted_msgid. Default: 0.",
     )
-    reconnect_on_connection_failure: bool | None = Field(
-        default=None,
-        description="Auto-retry if the initial connection fails. Default: True.",
-    )
-    reconnect_on_connection_failure_delay: int | None = Field(
-        default=None,
-        description="Seconds to wait before retrying a failed connection. Default: 10.",
-    )
+
+    # TLS
+    ssl: bool | None = Field(default=None, description="Enable TLS for the SMPP connection. Default: False.")
 
 
 class SmppConnectorUpdate(BaseModel):
@@ -161,7 +165,6 @@ class SmppConnectorUpdate(BaseModel):
     password: str | None = Field(default=None, min_length=1, max_length=8, description="New SMPP password.")
     bind_to: Literal["transceiver", "transmitter", "receiver"] | None = Field(default=None, description="New bind type.")
     system_type: str | None = Field(default=None, max_length=12, description="New system_type.")
-    interface_version: Literal["33", "34"] | None = Field(default=None, description="New SMPP version.")
     address_range: str | None = Field(default=None, max_length=40, description="New address range.")
 
     @field_validator("host", "username", "password", "system_type", "address_range")
@@ -176,10 +179,19 @@ class SmppConnectorUpdate(BaseModel):
     dest_addr_npi: int | None = Field(default=None, ge=0, le=18, description="New destination NPI.")
     submit_throughput: float | None = Field(default=None, ge=0, description="New throughput limit.")
     dlr_expiry: int | None = Field(default=None, ge=0, description="New DLR expiry seconds.")
-    reconnect_on_connection_loss: bool | None = Field(default=None, description="Update reconnect-on-loss setting.")
+    reconnect_on_connection_loss: bool | None = Field(default=None, description="Update reconnect-on-loss.")
     reconnect_on_connection_loss_delay: int | None = Field(default=None, description="Update reconnect-on-loss delay.")
-    reconnect_on_connection_failure: bool | None = Field(default=None, description="Update reconnect-on-failure setting.")
+    reconnect_on_connection_failure: bool | None = Field(default=None, description="Update reconnect-on-failure.")
     reconnect_on_connection_failure_delay: int | None = Field(default=None, description="Update reconnect-on-failure delay.")
+    bind_timeout: int | None = Field(default=None, ge=0, description="New bind timeout (jcli: bind_to).")
+    elink_interval: int | None = Field(default=None, ge=0, description="New enquire-link interval.")
+    res_to: int | None = Field(default=None, ge=0, description="New response timeout.")
+    pdu_red_to: int | None = Field(default=None, ge=0, description="New PDU inactivity timeout.")
+    trx_to: int | None = Field(default=None, ge=0, description="New TRX session timeout.")
+    requeue_delay: int | None = Field(default=None, ge=0, description="New requeue delay.")
+    coding: int | None = Field(default=None, ge=0, le=255, description="New data coding scheme.")
+    dlr_msgid: int | None = Field(default=None, ge=0, le=2, description="New DLR message ID field.")
+    ssl: bool | None = Field(default=None, description="Update TLS setting.")
 
 
 class SmppConnectorOut(BaseModel):
@@ -189,7 +201,6 @@ class SmppConnectorOut(BaseModel):
     username: str
     bind_to: str
     system_type: str | None = None
-    interface_version: str = "34"
     address_range: str | None = None
     source_addr_ton: int | None = None
     source_addr_npi: int | None = None
@@ -201,6 +212,15 @@ class SmppConnectorOut(BaseModel):
     reconnect_on_connection_loss_delay: int = 10
     reconnect_on_connection_failure: bool = True
     reconnect_on_connection_failure_delay: int = 10
+    bind_timeout: int | None = None
+    elink_interval: int | None = None
+    res_to: int | None = None
+    pdu_red_to: int | None = None
+    trx_to: int | None = None
+    requeue_delay: int | None = None
+    coding: int | None = None
+    dlr_msgid: int | None = None
+    ssl: bool = False
 
 
 class SmppConnectorStatusOut(BaseModel):

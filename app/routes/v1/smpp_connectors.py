@@ -76,7 +76,6 @@ async def create_connector(body: SmppConnectorCreate):
       "password": "s3cr3t",
       "bind_to": "transceiver",
       "system_type": "",
-      "interface_version": "34",
       "source_addr_ton": 1,
       "source_addr_npi": 1,
       "dest_addr_ton": 1,
@@ -95,7 +94,6 @@ async def create_connector(body: SmppConnectorCreate):
     | Field | Default | Description |
     |---|---|---|
     | `bind_to` | `transceiver` | `transceiver` (send+receive), `transmitter` (send only), `receiver` (receive only) |
-    | `interface_version` | `34` | SMPP version: `34` = v3.4 (recommended), `33` = v3.3 |
     | `source_addr_ton` | Jasmin default | TON: `0`=Unknown, `1`=International, `5`=Alphanumeric |
     | `source_addr_npi` | Jasmin default | NPI: `0`=Unknown, `1`=ISDN/E.164 |
     | `dest_addr_ton` | Jasmin default | TON for destination address |

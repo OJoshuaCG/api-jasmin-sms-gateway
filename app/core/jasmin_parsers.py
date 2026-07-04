@@ -309,18 +309,16 @@ def parse_smppccm_list(output: str) -> list[dict]:
 def parse_smppccm_show(output: str) -> dict:
     """Parse 'smppccm -s CID' output (space-separated key value pairs).
 
-    Jasmin field names differ from the API schema:
-      bind (type) → bind_to in schema
+    Jasmin → schema key mapping:
+      bind        → bind_to   (bind type: transceiver/transmitter/receiver)
+      bind_to     → bind_timeout (bind timeout in seconds — different from bind type)
       systype     → system_type
       addr_range  → address_range
-      src_ton     → source_addr_ton
-      src_npi     → source_addr_npi
-      dst_ton     → dest_addr_ton
-      dst_npi     → dest_addr_npi
-      con_loss_retry  → reconnect_on_connection_loss
-      con_loss_delay  → reconnect_on_connection_loss_delay
-      con_fail_retry  → reconnect_on_connection_failure
-      con_fail_delay  → reconnect_on_connection_failure_delay
+      src_ton/npi → source_addr_ton/npi
+      dst_ton/npi → dest_addr_ton/npi
+      con_loss_retry/delay  → reconnect_on_connection_loss/delay
+      con_fail_retry/delay  → reconnect_on_connection_failure/delay
+      ssl         → ssl (bool)
     """
     kv = parse_space_kv(output)
     return {
@@ -330,7 +328,6 @@ def parse_smppccm_show(output: str) -> dict:
         "username": kv.get("username", ""),
         "bind_to": kv.get("bind", "transceiver"),
         "system_type": parse_nullable(kv.get("systype", "") or "None"),
-        "interface_version": "34",
         "address_range": parse_nullable(kv.get("addr_range", "None") or "None"),
         "source_addr_ton": parse_int_nullable(kv.get("src_ton", "None") or "None"),
         "source_addr_npi": parse_int_nullable(kv.get("src_npi", "None") or "None"),
@@ -342,6 +339,15 @@ def parse_smppccm_show(output: str) -> dict:
         "reconnect_on_connection_loss_delay": int(kv.get("con_loss_delay", "10") or "10"),
         "reconnect_on_connection_failure": parse_bool(kv.get("con_fail_retry", "yes")),
         "reconnect_on_connection_failure_delay": int(kv.get("con_fail_delay", "10") or "10"),
+        "bind_timeout": parse_int_nullable(kv.get("bind_to", "None") or "None"),
+        "elink_interval": parse_int_nullable(kv.get("elink_interval", "None") or "None"),
+        "res_to": parse_int_nullable(kv.get("res_to", "None") or "None"),
+        "pdu_red_to": parse_int_nullable(kv.get("pdu_red_to", "None") or "None"),
+        "trx_to": parse_int_nullable(kv.get("trx_to", "None") or "None"),
+        "requeue_delay": parse_int_nullable(kv.get("requeue_delay", "None") or "None"),
+        "coding": parse_int_nullable(kv.get("coding", "None") or "None"),
+        "dlr_msgid": parse_int_nullable(kv.get("dlr_msgid", "None") or "None"),
+        "ssl": parse_bool(kv.get("ssl", "no")),
     }
 
 
