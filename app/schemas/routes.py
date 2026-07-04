@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.utils.validators import validate_no_control_chars
 
@@ -21,13 +21,19 @@ MtRouteType = Literal[
     "DefaultRoute",              # catch-all fallback; no filters needed; always at order 0
     "StaticMTRoute",             # single connector; requires at least one filter
     "RandomRoundrobinMTRoute",   # distributes across multiple connectors randomly
-    "LeastCostMTRoute",          # NOT DOCUMENTED — reserved for future use
+    "FailoverMTRoute",           # tries connectors in order; falls back on failure
 ]
 
 MoRouteType = Literal[
-    "DefaultRoute",   # catch-all fallback; no filters needed; always at order 0
-    "StaticMORoute",  # single connector; requires at least one filter
+    "DefaultRoute",              # catch-all fallback; no filters needed; always at order 0
+    "StaticMORoute",             # single connector; requires at least one filter
+    "RandomRoundrobinMORoute",   # distributes across multiple HTTP/SMPP connectors randomly
+    "FailoverMORoute",           # tries connectors in order; falls back on failure
 ]
+
+# Multi-connector route types (use 'connectors' plural key in jcli)
+MT_MULTI_CONNECTOR_TYPES = ("RandomRoundrobinMTRoute", "FailoverMTRoute")
+MO_MULTI_CONNECTOR_TYPES = ("RandomRoundrobinMORoute", "FailoverMORoute")
 
 
 class MtRouteCreate(BaseModel):
@@ -133,34 +139,57 @@ class MoRouteCreate(BaseModel):
         ...,
         description=(
             "Route type. DefaultRoute is the fallback (order forced to 0). "
-            "StaticMORoute requires filters."
+            "StaticMORoute requires filters. "
+            "RandomRoundrobinMORoute/FailoverMORoute require multiple connectors via 'connectors'."
         ),
     )
-    order: int = Field(
-        ...,
-        ge=0,
-        description="Evaluation priority. Lower = higher priority.",
-    )
-    connector: str = Field(
-        ...,
+    order: int = Field(..., ge=0, description="Evaluation priority. Lower = higher priority.")
+    connector: str | None = Field(
+        default=None,
         description=(
-            "HTTP connector ID with prefix. Use http(<cid>) for HTTP connectors. "
-            "Example: \"http(webhook_crm)\""
+            "Single connector ID with prefix. For DefaultRoute and StaticMORoute. "
+            "Use http(<cid>) or smpps(<cid>). Example: \"http(webhook_crm)\""
+        ),
+    )
+    connectors: list[str] | None = Field(
+        default=None,
+        description=(
+            "Multiple connector IDs for RandomRoundrobinMORoute and FailoverMORoute. "
+            "Use http(<cid>) or smpps(<cid>). Example: [\"http(wh1)\", \"http(wh2)\"]"
         ),
     )
     filters: list[str] = Field(
         default=[],
         description=(
-            "Filter FIDs to match. Required for StaticMORoute. "
-            "Auto-resolved to TransparentFilter if empty and route type requires filters. "
-            "Example: [\"filter_short_code\"]"
+            "Filter FIDs to match. Required for StaticMORoute and multi-connector types. "
+            "Auto-resolved to TransparentFilter if empty."
         ),
     )
 
+    @model_validator(mode="after")
+    def validate_connector_fields(self) -> "MoRouteCreate":
+        if self.type in MO_MULTI_CONNECTOR_TYPES:
+            if not self.connectors:
+                raise ValueError(f"{self.type} requires 'connectors' (list of connector IDs)")
+        else:
+            if not self.connector:
+                raise ValueError(f"{self.type} requires 'connector' (single connector ID)")
+        return self
+
     @field_validator("connector")
     @classmethod
-    def validate_connector(cls, v: str) -> str:
-        return validate_no_control_chars(v, "connector")
+    def validate_connector(cls, v: str | None) -> str | None:
+        if v is not None:
+            return validate_no_control_chars(v, "connector")
+        return v
+
+    @field_validator("connectors")
+    @classmethod
+    def validate_connectors(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for item in v:
+                validate_no_control_chars(item, "connectors")
+        return v
 
     @field_validator("filters")
     @classmethod
@@ -173,13 +202,16 @@ class MoRouteCreate(BaseModel):
 class MoRouteUpdate(BaseModel):
     connector: str | None = Field(
         default=None,
-        description="New HTTP connector ID. If omitted, existing connector is reused.",
+        description="New single connector ID. For DefaultRoute and StaticMORoute.",
+    )
+    connectors: list[str] | None = Field(
+        default=None,
+        description="New connector list. For RandomRoundrobinMORoute and FailoverMORoute.",
     )
     filters: list[str] | None = Field(
         default=None,
         description=(
-            "Replace filter list. Required if current route uses non-transparent filters "
-            "and connector is being changed."
+            "Replace filter list. Required if current route uses non-transparent filters."
         ),
     )
 
@@ -188,6 +220,14 @@ class MoRouteUpdate(BaseModel):
     def validate_connector(cls, v: str | None) -> str | None:
         if v is not None:
             return validate_no_control_chars(v, "connector")
+        return v
+
+    @field_validator("connectors")
+    @classmethod
+    def validate_connectors(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None:
+            for item in v:
+                validate_no_control_chars(item, "connectors")
         return v
 
     @field_validator("filters")
@@ -202,5 +242,6 @@ class MoRouteUpdate(BaseModel):
 class MoRouteOut(BaseModel):
     order: int
     type: str
-    connector: str
-    filters: list[str]  # always [] in response — filter FIDs are not recoverable from Jasmin
+    connector: str | None = None       # populated for single-connector types
+    connectors: list[str] = []         # populated for multi-connector types
+    filters: list[str]  # always [] — filter FIDs are not recoverable from Jasmin

@@ -8,11 +8,11 @@ from app.core.jasmin_parsers import (
 from app.core.jasmin_telnet import JasminTelnetSession, TelnetNotConnectedError
 from app.core.logger import get_logger
 from app.exceptions import AppHttpException
-from app.schemas.routes import MoRouteCreate, MoRouteOut, MoRouteUpdate
+from app.schemas.routes import MO_MULTI_CONNECTOR_TYPES, MoRouteCreate, MoRouteOut, MoRouteUpdate
 
 logger = get_logger(__name__)
 
-_FILTER_REQUIRED_TYPES = ("StaticMORoute", "FilteredMORoute")
+_FILTER_REQUIRED_TYPES = ("StaticMORoute", "RandomRoundrobinMORoute", "FailoverMORoute")
 
 
 def _telnet() -> JasminTelnetSession:
@@ -28,15 +28,19 @@ def _build_create_fields(
 ) -> list[tuple[str, str]]:
     """Build interactive fields for morouter --add.
 
-    MO route connector IDs use:
-      http(id)  for HTTP connectors
-      smpps(id) for SMPP server side connectors
+    Connector ID syntax: http(<cid>) for HTTP connectors, smpps(<cid>) for SMPP server.
+    Multi-connector types (RandomRoundrobinMORoute, FailoverMORoute) use 'connectors'
+    (plural, semicolon-separated). Single-connector types use 'connector'.
     """
     fields: list[tuple[str, str]] = [
         ("type", data.type),
         ("order", str(data.order)),
-        ("connector", data.connector),
     ]
+    if data.type in MO_MULTI_CONNECTOR_TYPES:
+        fields.append(("connectors", ";".join(data.connectors or [])))
+    else:
+        fields.append(("connector", data.connector or ""))
+
     effective_filters = data.filters or []
     if not effective_filters and data.type in _FILTER_REQUIRED_TYPES and fallback_filter_fid:
         effective_filters = [fallback_filter_fid]
@@ -141,7 +145,9 @@ class MoRoutesController:
 
         await self.delete_route(order)
         create_data = MoRouteCreate(
-            type=existing.type, order=order, connector=connector, filters=filters
+            type=existing.type, order=order,
+            connector=connector, connectors=connectors,
+            filters=filters,
         )
         return await self.create_route(create_data)
 

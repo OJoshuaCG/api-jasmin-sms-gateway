@@ -21,8 +21,8 @@ def _503(exc: TelnetNotConnectedError) -> None:
     raise AppHttpException("Jasmin is not available", 503, {"error": str(exc)})
 
 
-# Route types that require at least one filter field in jcli --add
-_FILTER_REQUIRED_TYPES = ("StaticMTRoute", "FilteredMTRoute")
+# All non-Default route types require at least one filter in jcli --add
+_FILTER_REQUIRED_TYPES = ("StaticMTRoute", "RandomRoundrobinMTRoute", "FailoverMTRoute")
 
 
 def _build_create_fields(

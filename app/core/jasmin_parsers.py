@@ -484,41 +484,86 @@ def parse_route_list(output: str) -> list[dict]:
 
 
 def parse_mt_route_show(output: str, order: int) -> dict:
-    """Parse 'mtrouter -s ORDER' one-liner.
+    """Parse 'mtrouter -s ORDER'.
 
-    Format: 'Type to connector [rated N.NN|NOT RATED]'
+    Single-connector:  'StaticMTRoute to smppc(id) rated 0.05'
+    Multi-connector:   'FailoverMTRoute to 2 connectors:\\n\\t- smppc(a)\\n\\t- smppc(b)\\nrated 0.05'
     """
-    for line in output.splitlines():
-        line = line.strip()
-        m = re.match(r'^(\w+)\s+to\s+(\S+)\s+(NOT RATED|rated\s+([\d.]+))', line)
-        if m:
-            rate_str = m.group(4)
-            return {
-                "order": order,
-                "type": m.group(1),
-                "connectors": [m.group(2)],
-                "filters": [],
-                "rate": float(rate_str) if rate_str else None,
-            }
+    lines = [l.strip() for l in output.splitlines() if l.strip()]
+    route_type = ""
+    connectors = []
+    rate = None
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Multi-connector header: "FailoverMTRoute to 2 connectors:"
+        m_multi = re.match(r'^(\w+)\s+to\s+\d+\s+connectors:', line)
+        if m_multi:
+            route_type = m_multi.group(1)
+            i += 1
+            while i < len(lines) and lines[i].startswith("- "):
+                connectors.append(lines[i][2:].strip())
+                i += 1
+            continue
+
+        # Single-connector: "StaticMTRoute to smppc(id) [rated N.NN|NOT RATED]"
+        m_single = re.match(r'^(\w+)\s+to\s+(\S+?)(?:\s+(NOT RATED|rated\s+([\d.]+)))?$', line)
+        if m_single and not route_type:
+            route_type = m_single.group(1)
+            connectors = [m_single.group(2)]
+            rate_str = m_single.group(4)
+            rate = float(rate_str) if rate_str else None
+
+        # Rate line (multi-connector case): "rated 0.05" or "NOT RATED"
+        m_rate = re.match(r'^rated\s+([\d.]+)$', line)
+        if m_rate:
+            rate = float(m_rate.group(1))
+
+        i += 1
+
+    if route_type:
+        return {"order": order, "type": route_type, "connectors": connectors, "filters": [], "rate": rate}
     return {"order": order, "type": "", "connectors": [], "filters": [], "rate": None}
 
 
 def parse_mo_route_show(output: str, order: int) -> dict:
-    """Parse 'morouter -s ORDER' one-liner.
+    """Parse 'morouter -s ORDER'.
 
-    Format: 'Type to connector [NOT RATED|rated N.NN]'
+    Single-connector:  'StaticMORoute to http(id)'
+    Multi-connector:   'RandomRoundrobinMORoute to 2 connectors:\\n\\t- http(a)\\n\\t- http(b)'
     """
-    for line in output.splitlines():
-        line = line.strip()
+    lines = [l.strip() for l in output.splitlines() if l.strip()]
+    route_type = ""
+    connector = None
+    connectors: list[str] = []
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Multi-connector header: "RandomRoundrobinMORoute to 2 connectors:"
+        m_multi = re.match(r'^(\w+)\s+to\s+\d+\s+connectors:', line)
+        if m_multi:
+            route_type = m_multi.group(1)
+            i += 1
+            while i < len(lines) and lines[i].startswith("- "):
+                connectors.append(lines[i][2:].strip())
+                i += 1
+            continue
+
+        # Single-connector: "StaticMORoute to http(id)"
         m = re.match(r'^(\w+)\s+to\s+(\S+)', line)
-        if m:
-            return {
-                "order": order,
-                "type": m.group(1),
-                "connector": m.group(2),
-                "filters": [],
-            }
-    return {"order": order, "type": "", "connector": "", "filters": []}
+        if m and not route_type:
+            route_type = m.group(1)
+            connector = m.group(2)
+
+        i += 1
+
+    if route_type:
+        return {"order": order, "type": route_type, "connector": connector, "connectors": connectors, "filters": []}
+    return {"order": order, "type": "", "connector": None, "connectors": [], "filters": []}
 
 
 def parse_route_show(output: str) -> dict:
