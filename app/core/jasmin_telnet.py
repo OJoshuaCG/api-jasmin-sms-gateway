@@ -1,11 +1,16 @@
 import asyncio
+import re
 import time
 from asyncio import StreamReader, StreamWriter
 from typing import Optional
 
-from app.core.logger import get_logger
+from app.core.logger import get_jcli_warnings_logger, get_logger
 
 logger = get_logger(__name__)
+_warnings_logger = get_jcli_warnings_logger()
+
+# Matches jcli interactive-mode rejections like: "Unknown User key: mt_throughput"
+_UNKNOWN_KEY_RE = re.compile(r"Unknown \w+ key:\s*\S+", re.IGNORECASE)
 
 # Jasmin jcli prompts — Jasmin 0.11.x uses "jcli : " as main prompt.
 # The main prompt always appears after every command completes.
@@ -252,6 +257,16 @@ class JasminTelnetSession:
                     # Strip the delimiter from the content before returning
                     return buf[: -len(d)].strip(), d
 
+    def _log_jcli_warnings(self, content: str, command: str, field_key: str) -> None:
+        """Detect and log jcli interactive-mode warnings without raising."""
+        for match in _UNKNOWN_KEY_RE.finditer(content):
+            _warnings_logger.warning(
+                "jcli rejected field | command=%r field=%r jcli_response=%r",
+                command,
+                field_key,
+                match.group(0),
+            )
+
     def _strip_prompt(self, response: str) -> str:
         """Remove trailing jcli prompt and surrounding whitespace from a response."""
         return response.removesuffix(_MAIN_PROMPT).strip()
@@ -340,6 +355,7 @@ class JasminTelnetSession:
                     self._writer.write(f"{key} {self._sanitize(str(value))}\r\n".encode())
                     await self._writer.drain()
                     _content, next_match = await self._read_until_one_of(_ALL_PROMPTS)
+                    self._log_jcli_warnings(_content, command, key)
                     # If jcli exited interactive mode early (validation error, etc.)
                     if not self._is_interactive_match(next_match):
                         return _content.strip()

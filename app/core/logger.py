@@ -1,7 +1,9 @@
 import logging
+import logging.handlers
 import re
+from pathlib import Path
 
-from app.core.environments import APP_NAME, LOGGER_LEVEL
+from app.core.environments import APP_NAME, LOGGER_JCLI_WARNINGS_FILE, LOGGER_LEVEL
 
 _SENSITIVE_QS_PARAMS = re.compile(r'(?i)(?<=[?&])password=[^&\s"]*')
 
@@ -16,6 +18,47 @@ class _SensitiveDataFilter(logging.Filter):
                 for a in record.args
             )
         return True
+
+
+_jcli_warnings_logger: logging.Logger | None = None
+
+
+def get_jcli_warnings_logger() -> logging.Logger:
+    """Logger dedicado a registrar advertencias de claves desconocidas en jcli.
+
+    Escribe en consola Y en un archivo rotativo (LOGGER_JCLI_WARNINGS_FILE).
+    Solo captura WARNING+; no eleva errores al caller.
+    """
+    global _jcli_warnings_logger
+    if _jcli_warnings_logger is not None:
+        return _jcli_warnings_logger
+
+    lg = logging.getLogger("jcli.warnings")
+    lg.setLevel(logging.WARNING)
+    lg.propagate = False
+
+    if not lg.hasHandlers():
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+
+        # Console
+        ch = logging.StreamHandler()
+        ch.setFormatter(formatter)
+        lg.addHandler(ch)
+
+        # Rotating file
+        log_path = Path(LOGGER_JCLI_WARNINGS_FILE)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        fh = logging.handlers.RotatingFileHandler(
+            log_path,
+            maxBytes=10 * 1024 * 1024,  # 10 MB por archivo
+            backupCount=5,
+            encoding="utf-8",
+        )
+        fh.setFormatter(formatter)
+        lg.addHandler(fh)
+
+    _jcli_warnings_logger = lg
+    return lg
 
 
 def _apply_sensitive_filter() -> None:

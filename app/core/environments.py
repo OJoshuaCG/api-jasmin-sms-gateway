@@ -37,6 +37,10 @@ LOGGER_EXCEPTIONS_ENABLED = (
 LOGGER_MIDDLEWARE_ERRORS_ONLY = (
     os.getenv("LOGGER_MIDDLEWARE_ERRORS_ONLY", "False").lower() == "true"
 )
+LOGGER_JCLI_WARNINGS_FILE = os.getenv(
+    "LOGGER_JCLI_WARNINGS_FILE",
+    str(ROOT_DIR / "logs" / "jcli_warnings.log"),
+)
 
 # ======= Docs variables ======= #
 DOCS_ENABLED = os.getenv("DOCS_ENABLED", "True").lower() == "true"
