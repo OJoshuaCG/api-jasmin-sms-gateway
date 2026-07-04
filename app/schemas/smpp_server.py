@@ -1,10 +1,4 @@
-from pydantic import BaseModel, Field
-
-
-class SmppServerUpdate(BaseModel):
-    host: str | None = None
-    port: int | None = Field(default=None, ge=1, le=65535)
-    max_bindings: int | None = None
+from pydantic import BaseModel
 
 
 class SmppServerOut(BaseModel):

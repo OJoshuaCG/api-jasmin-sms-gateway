@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.controllers.smpp_server_controller import SmppServerController
-from app.schemas.smpp_server import SmppServerOut, SmppServerUpdate
+from app.schemas.smpp_server import SmppServerOut
 from app.utils.response import ApiResponse, success
 
 router = APIRouter(prefix="/smpp-server", tags=["SMPP Server"])
@@ -38,24 +38,3 @@ async def get_smpp_server():
     return success(data=await SmppServerController().get_config())
 
 
-@router.patch("/", response_model=ApiResponse[SmppServerOut], summary="Update SMPP server configuration (not supported)")
-async def update_smpp_server(body: SmppServerUpdate):
-    """
-    **Not supported.** Always returns HTTP 501.
-
-    SMPP server settings (`host`, `port`, `max_bindings`) are configured via
-    `/etc/jasmin/jasmin.cfg` and require a full Jasmin restart to take effect.
-    They cannot be changed at runtime through jcli.
-
-    To modify the SMPP server configuration:
-    1. Edit `/etc/jasmin/jasmin.cfg` under the `[smpp-server]` section
-    2. Restart the Jasmin service
-
-    **Example `jasmin.cfg` section:**
-    ```ini
-    [smpp-server]
-    port = 2775
-    bind = 0.0.0.0
-    ```
-    """
-    return success(data=await SmppServerController().update_config(body))

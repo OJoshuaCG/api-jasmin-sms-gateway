@@ -8,7 +8,7 @@ import configparser
 import re
 
 from app.exceptions import AppHttpException
-from app.schemas.smpp_server import SmppServerOut, SmppServerUpdate
+from app.schemas.smpp_server import SmppServerOut
 
 _JASMIN_CFG = "/etc/jasmin/jasmin.cfg"
 
@@ -65,11 +65,3 @@ class SmppServerController:
             ) from exc
         return SmppServerOut(**data)
 
-    async def update_config(self, data: SmppServerUpdate) -> SmppServerOut:
-        # jcli does not expose smppserver management; config changes require
-        # editing jasmin.cfg and restarting Jasmin.
-        raise AppHttpException(
-            "SMPP server configuration cannot be updated via API. "
-            "Edit /etc/jasmin/jasmin.cfg and restart Jasmin.",
-            501,
-        )
