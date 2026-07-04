@@ -41,6 +41,9 @@ async def app_exception_handler(request: Request, exc: AppHttpException):
         ]
         logger.warning(" | ".join(logger_warning_exception))
 
+    if isinstance(getattr(exc, "context", None), dict) and "existing" in exc.context:
+        detail_error["existing"] = exc.context["existing"]
+
     if APP_ENV == "development":
         if getattr(exc, "context", None):
             detail_error["context"] = exc.context

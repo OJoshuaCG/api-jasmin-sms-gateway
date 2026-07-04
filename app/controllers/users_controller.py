@@ -143,6 +143,16 @@ class UsersController:
         return user
 
     async def create_user(self, data: UserCreate) -> UserOut:
+        try:
+            existing = await self.get_user(data.uid)
+            raise AppHttpException(
+                f"User '{data.uid}' already exists", 409,
+                {"uid": data.uid, "existing": existing.model_dump(exclude_none=True)},
+            )
+        except AppHttpException as exc:
+            if exc.status_code != 404:
+                raise
+
         fields = [("uid", data.uid), ("gid", data.gid), ("username", data.username)] + _build_user_fields(data)
         try:
             output = await _telnet().execute_interactive(
@@ -153,10 +163,7 @@ class UsersController:
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            msg = extract_error_message(output)
-            if "already" in msg.lower():
-                raise AppHttpException(f"User '{data.uid}' already exists", 409, {"uid": data.uid, "gid": data.gid})
-            raise AppHttpException(msg, 400, {"uid": data.uid, "gid": data.gid})
+            raise AppHttpException(extract_error_message(output), 400, {"uid": data.uid, "gid": data.gid})
         return await self.get_user(data.uid)
 
     async def update_user(self, uid: str, data: UserUpdate) -> UserOut:

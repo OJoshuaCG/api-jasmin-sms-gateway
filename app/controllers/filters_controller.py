@@ -80,6 +80,16 @@ class FiltersController:
         return FilterOut(**parsed)
 
     async def create_filter(self, data: FilterCreate) -> FilterOut:
+        try:
+            existing = await self.get_filter(data.fid)
+            raise AppHttpException(
+                f"Filter '{data.fid}' already exists", 409,
+                {"fid": data.fid, "existing": existing.model_dump(exclude_none=True)},
+            )
+        except AppHttpException as exc:
+            if exc.status_code != 404:
+                raise
+
         fields = _build_filter_fields(data, data.fid)
         try:
             output = await _telnet().execute_interactive(
@@ -90,10 +100,7 @@ class FiltersController:
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            msg = extract_error_message(output)
-            if "already" in msg.lower():
-                raise AppHttpException(f"Filter '{data.fid}' already exists", 409, {"fid": data.fid, "filter_type": data.type})
-            raise AppHttpException(msg, 400, {"fid": data.fid, "filter_type": data.type})
+            raise AppHttpException(extract_error_message(output), 400, {"fid": data.fid, "filter_type": data.type})
         return await self.get_filter(data.fid)
 
     async def update_filter(self, fid: str, data: FilterUpdate) -> FilterOut:

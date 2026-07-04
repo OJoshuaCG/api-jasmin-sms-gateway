@@ -140,7 +140,16 @@ class SmppConnectorsController:
         return SmppConnectorOut(**parse_smppccm_show(output))
 
     async def create_connector(self, data: SmppConnectorCreate) -> SmppConnectorOut:
-        # cid is the first field in interactive mode
+        try:
+            existing = await self.get_connector(data.cid)
+            raise AppHttpException(
+                f"Connector '{data.cid}' already exists", 409,
+                {"cid": data.cid, "existing": existing.model_dump(exclude_none=True)},
+            )
+        except AppHttpException as exc:
+            if exc.status_code != 404:
+                raise
+
         fields = [("cid", data.cid)] + _connector_fields(data)
         try:
             output = await _telnet().execute_interactive(
@@ -151,10 +160,7 @@ class SmppConnectorsController:
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            msg = extract_error_message(output)
-            if "already" in msg.lower():
-                raise AppHttpException(f"Connector '{data.cid}' already exists", 409, {"cid": data.cid})
-            raise AppHttpException(msg, 400, {"cid": data.cid})
+            raise AppHttpException(extract_error_message(output), 400, {"cid": data.cid})
         return await self.get_connector(data.cid)
 
     async def update_connector(self, cid: str, data: SmppConnectorUpdate) -> SmppConnectorOut:

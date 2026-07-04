@@ -111,6 +111,17 @@ class MtRoutesController:
         return MtRouteOut(**data)
 
     async def create_route(self, data: MtRouteCreate) -> MtRouteOut:
+        check_order = 0 if data.type == "DefaultRoute" else data.order
+        try:
+            existing = await self.get_route(check_order)
+            raise AppHttpException(
+                f"MT route with order {check_order} already exists", 409,
+                {"order": check_order, "existing": existing.model_dump(exclude_none=True)},
+            )
+        except AppHttpException as exc:
+            if exc.status_code != 404:
+                raise
+
         fallback_fid = ""
         if not data.filters and data.type in _FILTER_REQUIRED_TYPES:
             fallback_fid = await self._resolve_transparent_filter_fid()
@@ -131,13 +142,9 @@ class MtRoutesController:
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            msg = extract_error_message(output)
-            if "already" in msg.lower():
-                raise AppHttpException(f"MT route with order {data.order} already exists", 409, {"order": data.order, "route_type": data.type})
-            raise AppHttpException(msg, 400, {"order": data.order, "route_type": data.type})
+            raise AppHttpException(extract_error_message(output), 400, {"order": data.order, "route_type": data.type})
         # DefaultRoute is always created at order 0 regardless of what was requested
-        actual_order = 0 if data.type == "DefaultRoute" else data.order
-        return await self.get_route(actual_order)
+        return await self.get_route(check_order)
 
     async def update_route(self, order: int, data: MtRouteUpdate) -> MtRouteOut:
         existing = await self.get_route(order)

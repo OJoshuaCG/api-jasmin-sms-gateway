@@ -98,6 +98,17 @@ class MoRoutesController:
         return MoRouteOut(**data)
 
     async def create_route(self, data: MoRouteCreate) -> MoRouteOut:
+        check_order = 0 if data.type == "DefaultRoute" else data.order
+        try:
+            existing = await self.get_route(check_order)
+            raise AppHttpException(
+                f"MO route with order {check_order} already exists", 409,
+                {"order": check_order, "existing": existing.model_dump(exclude_none=True)},
+            )
+        except AppHttpException as exc:
+            if exc.status_code != 404:
+                raise
+
         fallback_fid = ""
         if not data.filters and data.type in _FILTER_REQUIRED_TYPES:
             fallback_fid = await self._resolve_transparent_filter_fid()
@@ -118,16 +129,17 @@ class MoRoutesController:
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            msg = extract_error_message(output)
-            if "already" in msg.lower():
-                raise AppHttpException(f"MO route with order {data.order} already exists", 409, {"order": data.order, "route_type": data.type})
-            raise AppHttpException(msg, 400, {"order": data.order, "route_type": data.type})
-        actual_order = 0 if data.type == "DefaultRoute" else data.order
-        return await self.get_route(actual_order)
+            raise AppHttpException(extract_error_message(output), 400, {"order": data.order, "route_type": data.type})
+        return await self.get_route(check_order)
 
     async def update_route(self, order: int, data: MoRouteUpdate) -> MoRouteOut:
         existing = await self.get_route(order)
-        connector = data.connector if data.connector is not None else existing.connector
+        if existing.type in MO_MULTI_CONNECTOR_TYPES:
+            connector = None
+            connectors = data.connectors if data.connectors is not None else existing.connectors
+        else:
+            connector = data.connector if data.connector is not None else existing.connector
+            connectors = None
 
         if data.filters is not None:
             filters = data.filters

@@ -40,6 +40,16 @@ class GroupsController:
 
     async def create_group(self, data: GroupCreate) -> GroupOut:
         try:
+            existing = await self.get_group(data.gid)
+            raise AppHttpException(
+                f"Group '{data.gid}' already exists", 409,
+                {"gid": data.gid, "existing": existing.model_dump(exclude_none=True)},
+            )
+        except AppHttpException as exc:
+            if exc.status_code != 404:
+                raise
+
+        try:
             output = await _telnet().execute_interactive(
                 "group --add",
                 [("gid", data.gid)],
@@ -48,10 +58,7 @@ class GroupsController:
         except TelnetNotConnectedError as exc:
             _handle_not_connected(exc)
         if not is_success(output):
-            msg = extract_error_message(output)
-            if "already" in msg.lower():
-                raise AppHttpException(f"Group '{data.gid}' already exists", 409, {"gid": data.gid})
-            raise AppHttpException(msg, 400, {"gid": data.gid})
+            raise AppHttpException(extract_error_message(output), 400, {"gid": data.gid})
         return await self.get_group(data.gid)
 
     async def update_group(self, gid: str, data: GroupUpdate) -> GroupOut:

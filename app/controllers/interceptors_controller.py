@@ -96,6 +96,16 @@ class MtInterceptorsController:
         return _make_interceptor_out(kv, "mt", order)
 
     async def create_interceptor(self, data: MtInterceptorCreate) -> InterceptorOut:
+        try:
+            existing = await self.get_interceptor(data.order)
+            raise AppHttpException(
+                f"MT interceptor with order {data.order} already exists", 409,
+                {"order": data.order, "existing": existing.model_dump(exclude_none=True)},
+            )
+        except AppHttpException as exc:
+            if exc.status_code != 404:
+                raise
+
         script_path = _save_script("mt", data.order, data.script)
         fields = _build_interceptor_fields(data.type, data.order, script_path, data.filters)
         try:
@@ -107,13 +117,7 @@ class MtInterceptorsController:
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            msg = extract_error_message(output)
-            if "already" in msg.lower():
-                raise AppHttpException(
-                    f"MT interceptor with order {data.order} already exists", 409,
-                    {"order": data.order, "interceptor_type": data.type},
-                )
-            raise AppHttpException(msg, 400, {"order": data.order, "interceptor_type": data.type})
+            raise AppHttpException(extract_error_message(output), 400, {"order": data.order, "interceptor_type": data.type})
         return await self.get_interceptor(data.order)
 
     async def update_interceptor(self, order: int, data: MtInterceptorUpdate) -> InterceptorOut:
@@ -182,6 +186,16 @@ class MoInterceptorsController:
         return _make_interceptor_out(kv, "mo", order)
 
     async def create_interceptor(self, data: MoInterceptorCreate) -> InterceptorOut:
+        try:
+            existing = await self.get_interceptor(data.order)
+            raise AppHttpException(
+                f"MO interceptor with order {data.order} already exists", 409,
+                {"order": data.order, "existing": existing.model_dump(exclude_none=True)},
+            )
+        except AppHttpException as exc:
+            if exc.status_code != 404:
+                raise
+
         script_path = _save_script("mo", data.order, data.script)
         fields = _build_interceptor_fields(data.type, data.order, script_path, data.filters)
         try:
@@ -193,13 +207,7 @@ class MoInterceptorsController:
         except TelnetNotConnectedError as exc:
             _503(exc)
         if not is_success(output):
-            msg = extract_error_message(output)
-            if "already" in msg.lower():
-                raise AppHttpException(
-                    f"MO interceptor with order {data.order} already exists", 409,
-                    {"order": data.order, "interceptor_type": data.type},
-                )
-            raise AppHttpException(msg, 400, {"order": data.order, "interceptor_type": data.type})
+            raise AppHttpException(extract_error_message(output), 400, {"order": data.order, "interceptor_type": data.type})
         return await self.get_interceptor(data.order)
 
     async def update_interceptor(self, order: int, data: MoInterceptorUpdate) -> InterceptorOut:
