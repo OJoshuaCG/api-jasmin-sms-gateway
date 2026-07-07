@@ -44,10 +44,11 @@ Cliente → POST /sms/send (esta API)
 | `content` | `string` | Sí | Texto del mensaje. UTF-8. Máximo 160 chars para GSM7, 70 para Unicode |
 | `from` | `string \| null` | No | Sender ID o número origen. Ejemplo: `"EMPRESA"` o `"+525512345678"`. Si se omite, usa el default del carrier |
 | `coding` | `int` | No | Codificación del mensaje. `0` = GSM7 (default), `8` = UCS2 (Unicode), `1` = Latin-1 |
-| `dlr` | `"yes" \| "no"` | No | Solicitar reporte de entrega (DLR). Default: `"no"` |
-| `dlr_url` | `string \| null` | No | URL de callback para el DLR. Requerido si `dlr = "yes"`. Ejemplo: `"https://myapp.com/dlr"` |
-| `dlr_level` | `int \| null` | No | Nivel de DLR: `1` = entregado al carrier, `2` = entregado al dispositivo, `3` = ambos |
-| `dlr_method` | `"GET" \| "POST" \| null` | No | Método HTTP para el callback del DLR. Default: `"GET"` |
+| `dlr` | `"yes" \| "no"` | No | Solicitar reporte de entrega (DLR). Default: `"no"`. **Se ignora con `DLR_ENABLED=true`** (siempre se solicita DLR) |
+| `dlr_params` | `dict \| null` | No | Params que se concatenan como query a la `DLR_URL` centralizada. Ejemplo: `{"org_id": 12}` → `DLR_URL?org_id=12`. Solo aplica con `DLR_ENABLED=true` |
+| `dlr_url` | `string \| null` | No | URL de callback del DLR. **Solo modo legacy** (`DLR_ENABLED=false`); se **ignora** cuando el DLR está centralizado en el gateway |
+| `dlr_level` | `int \| null` | No | Nivel de DLR: `1` = entregado al carrier, `2` = entregado al dispositivo, `3` = ambos. Default: env `DLR_LEVEL` |
+| `dlr_method` | `"GET" \| "POST" \| null` | No | Método HTTP para el callback del DLR. Default: env `DLR_METHOD` |
 | `priority` | `int \| null` | No | Prioridad del mensaje: `0` (normal) a `3` (máxima). Requiere autorización del usuario |
 | `schedule_delivery_time` | `string \| null` | No | Programar entrega. Formato: `"YYMMDDHHmmss000+"`. Requiere autorización |
 | `validity_period` | `string \| null` | No | Período de validez. Formato relativo: `"000024000000R"` (24 horas) |
@@ -181,7 +182,31 @@ Respuesta:
 
 ## DLR (Delivery Receipt) — Callback de entrega
 
-Cuando se envía un mensaje con `dlr = "yes"`, Jasmin hace una llamada HTTP a `dlr_url` cuando el carrier confirma la entrega.
+Cuando se envía un mensaje con `dlr = "yes"`, Jasmin hace una llamada HTTP a la URL del DLR cuando el carrier confirma la entrega.
+
+### DLR centralizado (recomendado)
+
+Con `DLR_ENABLED=true`, la URL del DLR se define **en el gateway** vía variables de entorno, no la manda el cliente. Esto centraliza el punto de recepción, elimina el riesgo de SSRF (el cliente no puede apuntar a URLs internas) y da un formato consistente. En este modo **todos los envíos solicitan DLR**: el campo `dlr` del body se ignora.
+
+| Variable | Descripción |
+|----------|-------------|
+| `DLR_ENABLED` | Activa el DLR centralizado (`true`/`false`) |
+| `DLR_URL` | URL base del webhook que recibe los DLR |
+| `DLR_METHOD` | `GET` o `POST` (dlr-method hacia Jasmin). Default `POST` |
+| `DLR_LEVEL` | `1`/`2`/`3`. Default `3` |
+| `DLR_DEFAULT_PARAMS` | JSON dict de params fijos que se concatenan siempre. Opcional |
+
+El cliente aporta en el body `dlr_params` (dict), que se **concatenan como query params** a `DLR_URL`:
+
+```
+DLR_URL = https://host/api/v1/sms/webhook/dlr
+body    = { "dlr": "yes", "dlr_params": { "org_id": 12, "ref": "abc" } }
+→ dlr-url que recibe Jasmin: https://host/api/v1/sms/webhook/dlr?org_id=12&ref=abc
+```
+
+Jasmin **preserva ese query string** y le añade sus propios campos al hacer el callback. Si `DLR_METHOD=POST`, los campos de Jasmin viajan en el body `form-urlencoded` y tus `dlr_params` siguen en el query string (los `dlr_params` **no** pueden ir en el body: Jasmin es dueño del body). Si `DLR_METHOD=GET`, todo viaja en el query string.
+
+> **Nota:** como los `dlr_params` viajan en la URL, se recomienda mantenerlos cortos (identificadores como `org_id`, `ref`), no payloads grandes.
 
 ### Parámetros que Jasmin incluye en el callback
 

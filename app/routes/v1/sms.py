@@ -14,7 +14,15 @@ async def send_sms(body: SmsSendRequest):
 
     Jasmin authenticates the user, evaluates MT interceptors, selects an MT route,
     and delivers the message via the matching SMPP connector. Optionally requests
-    a delivery receipt (DLR) posted to `dlr_url`.
+    a delivery receipt (DLR).
+
+    **DLR centralizado:** cuando el servidor tiene `DLR_ENABLED=true`, la URL de
+    destino del DLR se define en el gateway (`DLR_URL`) y **no** se toma del cliente.
+    En este modo **todos los envíos solicitan DLR** (el campo `dlr` del body se
+    ignora). El cliente solo aporta `dlr_params` (dict), que se concatenan como
+    query params a esa URL (ej. `DLR_URL?org_id=12`). Cualquier `dlr_url` enviado
+    en el body también se ignora. Si `DLR_ENABLED=false`, el DLR es opt-in vía
+    `dlr` y se respeta el `dlr_url` del cliente (comportamiento legacy).
 
     **Body:**
     ```json
@@ -26,9 +34,7 @@ async def send_sms(body: SmsSendRequest):
       "from": "MyBrand",
       "coding": 0,
       "dlr": "yes",
-      "dlr_url": "https://myapp.com/dlr",
-      "dlr_level": 3,
-      "dlr_method": "POST",
+      "dlr_params": { "org_id": 12 },
       "priority": 0,
       "tags": []
     }
@@ -44,10 +50,11 @@ async def send_sms(body: SmsSendRequest):
     | `content` | Yes | — | Message text |
     | `from` (alias) | No | — | Sender ID or source MSISDN |
     | `coding` | No | `0` | Data coding scheme: `0`=GSM7, `1`=Binary, `8`=UCS2 |
-    | `dlr` | No | `"no"` | Request delivery receipt: `"yes"` or `"no"` |
-    | `dlr_url` | No | — | URL to receive the DLR callback (required if `dlr="yes"`) |
-    | `dlr_level` | No | — | DLR level: `1`=final, `2`=intermediate, `3`=both |
-    | `dlr_method` | No | — | HTTP method for DLR callback: `GET` or `POST` |
+    | `dlr` | No | `"no"` | Request delivery receipt: `"yes"` or `"no"`. **Ignorado con `DLR_ENABLED=true`** (siempre se solicita DLR) |
+    | `dlr_params` | No | — | Dict que se concatena como query a la `DLR_URL` centralizada (ej. `{"org_id": 12}`). Solo aplica con `DLR_ENABLED=true` |
+    | `dlr_url` | No | — | URL del DLR (solo modo legacy, `DLR_ENABLED=false`; ignorado si el DLR está centralizado) |
+    | `dlr_level` | No | env `DLR_LEVEL` | DLR level: `1`=final, `2`=intermediate, `3`=both |
+    | `dlr_method` | No | env `DLR_METHOD` | HTTP method for DLR callback: `GET` or `POST` |
     | `priority` | No | — | Message priority: `0`–`3` (requires user `mt_auth_priority`) |
     | `schedule_delivery_time` | No | — | Scheduled delivery (format: `YYMMDDHHmmss000R`) |
     | `validity_period` | No | — | Validity period (format: `YYMMDDHHmmss000R`) |
