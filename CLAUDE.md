@@ -247,6 +247,13 @@ JASMIN_TELNET_TIMEOUT # segundos por comando, default: 10
 JASMIN_HTTP_HOST      # default: localhost
 JASMIN_HTTP_PORT      # default: 1401
 
+# DLR centralizado
+DLR_ENABLED           # default: False. Si True, la URL del DLR la fija el gateway (no el cliente)
+DLR_URL               # URL base del webhook que recibe los delivery receipts
+DLR_METHOD            # GET | POST (dlr-method hacia Jasmin), default: POST
+DLR_LEVEL             # 1 | 2 | 3, default: 3
+DLR_DEFAULT_PARAMS    # JSON dict de params fijos concatenados siempre a DLR_URL (opcional)
+
 # Interceptores
 JASMIN_SCRIPTS_DIR    # default: /etc/jasmin/scripts
 
