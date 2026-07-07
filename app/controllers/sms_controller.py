@@ -1,7 +1,9 @@
 import json as _json
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
+from app.core import environments
 from app.core.jasmin_http import get_jasmin_http_client
 from app.exceptions import AppHttpException
 from app.schemas.sms import SmsBinaryRequest, SmsBalanceOut, SmsRateOut, SmsSendOut, SmsSendRequest
@@ -9,6 +11,51 @@ from app.schemas.sms import SmsBinaryRequest, SmsBalanceOut, SmsRateOut, SmsSend
 
 def _http_client() -> httpx.AsyncClient:
     return get_jasmin_http_client()
+
+
+def _merge_query(base_url: str, extra: dict) -> str:
+    """Concatena `extra` como query params a `base_url`, respetando cualquier
+    query string ya presente y codificando valores de forma segura."""
+    parts = urlsplit(base_url)
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    query.extend((str(k), str(v)) for k, v in extra.items())
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _apply_dlr(params: dict, data) -> None:
+    """Rellena los parámetros de DLR en la request a Jasmin.
+
+    El DLR está centralizado y activo solo si ``DLR_ENABLED`` **y** ``DLR_URL``
+    están definidos. En ese caso **todos** los envíos solicitan DLR (se ignora el
+    campo ``dlr`` del cliente): la URL destino vive en env y el cliente solo aporta
+    ``dlr_params``, que se concatenan como query string. El ``dlr_url`` que mande
+    el cliente se ignora (evita SSRF y mantiene un único punto de control).
+    ``dlr-method`` y ``dlr-level`` toman el valor del body si viene, y si no el
+    default de env.
+
+    Si el DLR no está activo (flag apagado o sin URL), no se solicita DLR de forma
+    centralizada; se conserva el comportamiento legacy: el DLR es opt-in vía
+    ``dlr`` y el cliente controla su propia ``dlr_url``.
+    """
+    if environments.DLR_ENABLED and environments.DLR_URL:
+        params["dlr"] = "yes"
+        extra = {**environments.DLR_DEFAULT_PARAMS, **(data.dlr_params or {})}
+        params["dlr-url"] = _merge_query(environments.DLR_URL, extra)
+        params["dlr-method"] = data.dlr_method or environments.DLR_METHOD
+        params["dlr-level"] = data.dlr_level if data.dlr_level is not None else environments.DLR_LEVEL
+        return
+
+    # Legacy: DLR opt-in, el cliente controla su propia URL
+    if data.dlr == "no":
+        params["dlr"] = "no"
+        return
+    params["dlr"] = "yes"
+    if data.dlr_url:
+        params["dlr-url"] = data.dlr_url
+    if data.dlr_method:
+        params["dlr-method"] = data.dlr_method
+    if data.dlr_level is not None:
+        params["dlr-level"] = data.dlr_level
 
 
 class SmsController:
@@ -20,16 +67,10 @@ class SmsController:
             "to": data.to,
             "content": data.content,
             "coding": data.coding,
-            "dlr": data.dlr,
         }
         if data.sender:
             params["from"] = data.sender
-        if data.dlr_url:
-            params["dlr-url"] = data.dlr_url
-        if data.dlr_level is not None:
-            params["dlr-level"] = data.dlr_level
-        if data.dlr_method:
-            params["dlr-method"] = data.dlr_method
+        _apply_dlr(params, data)
         if data.priority is not None:
             params["priority"] = data.priority
         if data.schedule_delivery_time:
@@ -65,16 +106,10 @@ class SmsController:
             "to": data.to,
             "hex-content": data.hex_content,
             "coding": data.coding,
-            "dlr": data.dlr,
         }
         if data.sender:
             params["from"] = data.sender
-        if data.dlr_url:
-            params["dlr-url"] = data.dlr_url
-        if data.dlr_level is not None:
-            params["dlr-level"] = data.dlr_level
-        if data.dlr_method:
-            params["dlr-method"] = data.dlr_method
+        _apply_dlr(params, data)
 
         try:
             resp = await _http_client().get("/send", params=params)

@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -87,6 +88,25 @@ JASMIN_TELNET_TIMEOUT = int(os.getenv("JASMIN_TELNET_TIMEOUT", "10"))
 JASMIN_HTTP_HOST = os.getenv("JASMIN_HTTP_HOST", "localhost")
 JASMIN_HTTP_PORT = int(os.getenv("JASMIN_HTTP_PORT", "1401"))
 
+# ======= DLR (Delivery Receipt) variables ======= #
+# El DLR se centraliza en este gateway: la URL destino vive aquí (env), no la
+# especifica el cliente. En cada envío el cliente solo aporta `dlr_params`
+# (dict), que se concatenan como query params a DLR_URL. Jasmin preserva ese
+# query string y le añade sus propios campos al hacer el callback.
+DLR_ENABLED = os.getenv("DLR_ENABLED", "False").lower() == "true"
+DLR_URL = os.getenv("DLR_URL", "")
+DLR_METHOD = os.getenv("DLR_METHOD", "POST").upper()  # GET | POST (dlr-method hacia Jasmin)
+DLR_LEVEL = int(os.getenv("DLR_LEVEL", "3"))  # 1=final | 2=intermedio | 3=ambos
+
+# Params estáticos que se concatenan SIEMPRE a la URL del DLR (JSON dict).
+_dlr_default_params_raw = os.getenv("DLR_DEFAULT_PARAMS", "")
+try:
+    DLR_DEFAULT_PARAMS = json.loads(_dlr_default_params_raw) if _dlr_default_params_raw.strip() else {}
+    if not isinstance(DLR_DEFAULT_PARAMS, dict):
+        DLR_DEFAULT_PARAMS = {}
+except json.JSONDecodeError:
+    DLR_DEFAULT_PARAMS = {}
+
 # ======= Admin API variables ======= #
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
 JASMIN_SCRIPTS_DIR = os.getenv("JASMIN_SCRIPTS_DIR", "/etc/jasmin/scripts")
@@ -115,6 +135,20 @@ if not ADMIN_API_KEY:
         "ADMIN_API_KEY no está definido. Todos los endpoints de la API devolverán 500. "
         "Define ADMIN_API_KEY en tu .env."
     )
+
+if DLR_ENABLED:
+    if not DLR_URL:
+        # El DLR centralizado se considera activo solo con flag + URL. Sin URL
+        # simplemente no se solicita DLR (no bloquea el arranque).
+        _logging.warning(
+            "DLR_ENABLED=true pero DLR_URL no está definido: el DLR centralizado "
+            "queda INACTIVO (no se solicitará DLR en los envíos)."
+        )
+    else:
+        if DLR_METHOD not in ("GET", "POST"):
+            raise ValueError(f"DLR_METHOD inválido: '{DLR_METHOD}'. Usa 'GET' o 'POST'.")
+        if DLR_LEVEL not in (1, 2, 3):
+            raise ValueError(f"DLR_LEVEL inválido: {DLR_LEVEL}. Usa 1, 2 o 3.")
 
 if APP_ENV == "production":
     if _JASMIN_TELNET_PASSWORD_RAW is None:

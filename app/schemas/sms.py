@@ -14,6 +14,10 @@ class SmsSendRequest(BaseModel):
     dlr_url: str | None = None
     dlr_level: int | None = None
     dlr_method: Literal["GET", "POST"] | None = None
+    dlr_params: dict[str, str | int | float] | None = Field(
+        default=None,
+        description="Params que se concatenan a la URL de DLR centralizada (ej. {\"org_id\": 12}). Solo aplica si el DLR está centralizado en el gateway.",
+    )
     priority: int | None = Field(default=None, ge=0, le=3)
     schedule_delivery_time: str | None = None
     validity_period: str | None = None
@@ -33,6 +37,10 @@ class SmsBinaryRequest(BaseModel):
     dlr_url: str | None = None
     dlr_level: int | None = None
     dlr_method: Literal["GET", "POST"] | None = None
+    dlr_params: dict[str, str | int | float] | None = Field(
+        default=None,
+        description="Params que se concatenan a la URL de DLR centralizada (ej. {\"org_id\": 12}). Solo aplica si el DLR está centralizado en el gateway.",
+    )
 
     model_config = {"populate_by_name": True}
 
