@@ -77,12 +77,15 @@ curl -s -X POST "$BASE/sms/send" \
     "password": "pass123",
     "to": "50212345678",
     "content": "Hola mundo",
-    "dlr": "yes",
-    "dlr_url": "https://miapp.com/dlr",
-    "dlr_level": 3,
-    "dlr_method": "POST"
+    "dlr_params": { "org_id": 12 }
   }'
 ```
+
+> El DLR está centralizado en el gateway: la URL destino se define en las
+> variables de entorno (`DLR_URL`) y **no** se envía en el body. Con
+> `DLR_ENABLED=true` todos los envíos solicitan DLR y los `dlr_params` se
+> concatenan como query params a esa URL. Los campos `dlr_url`/`dlr_method`/`dlr_level`
+> del body solo aplican en modo legacy (`DLR_ENABLED=false`).
 
 ### Python (httpx)
 

@@ -216,7 +216,8 @@ POST /sms/send
     → Jasmin ejecuta MT Interceptors
     → Jasmin evalúa MT Routes → selecciona SMPP Connector
     → Carrier recibe el SMS
-    → (async) DLR callback al dlr_url del cliente
+    → (async) DLR callback a la URL centralizada del gateway (DLR_URL),
+      con los dlr_params concatenados como query params
 ```
 
 ## Flujo de un Mensaje Entrante (MO)

@@ -78,7 +78,8 @@ Un mensaje enviado por un cliente de la plataforma hacia un número de celular:
 9. Sidecar retorna { "message_id": "..." } al cliente
         │
 10. (Asíncrono) Carrier envía DLR → Jasmin →
-    Jasmin hace POST al dlr_url del cliente
+    Jasmin hace el callback a la URL centralizada del gateway
+    (DLR_URL + dlr_params como query params)
 ```
 
 ---

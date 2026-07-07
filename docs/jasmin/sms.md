@@ -16,7 +16,7 @@ Cliente → POST /sms/send (esta API)
     → Jasmin evalúa MT Routes
     → Jasmin entrega al SMPP Connector
     → Carrier → SMS al destinatario
-    (→ DLR callback a dlr_url si se configuró)
+    (→ DLR callback a la URL centralizada del gateway, DLR_URL + dlr_params)
 ```
 
 ---
@@ -73,12 +73,13 @@ curl -X POST https://api.example.com/api/v1/sms/send \
     "content": "Tu código de verificación es: 482910",
     "from": "ACME",
     "coding": 0,
-    "dlr": "yes",
-    "dlr_url": "https://myapp.com/dlr/callback",
-    "dlr_level": 2,
-    "dlr_method": "POST"
+    "dlr_params": { "org_id": 12 }
   }'
 ```
+
+> Con el DLR centralizado (`DLR_ENABLED=true`), la URL destino la fija el gateway
+> (`DLR_URL`) y solo se aportan `dlr_params`, que se concatenan como query params.
+> Los campos `dlr_url`/`dlr_method`/`dlr_level` solo aplican en modo legacy.
 
 Respuesta:
 ```json
@@ -105,10 +106,11 @@ Envía un mensaje con contenido binario arbitrario, útil para WAP push, rington
 | `hex_content` | `string` | Sí | Contenido del mensaje en hexadecimal. Ejemplo: `"48656c6c6f"` (= "Hello") |
 | `coding` | `int` | No | Data coding del PDU SMPP. Default: `1` (binary/8-bit) |
 | `from` | `string \| null` | No | Sender ID o número origen |
-| `dlr` | `"yes" \| "no"` | No | Solicitar DLR |
-| `dlr_url` | `string \| null` | No | URL de callback DLR |
-| `dlr_level` | `int \| null` | No | Nivel de DLR |
-| `dlr_method` | `"GET" \| "POST" \| null` | No | Método HTTP del DLR |
+| `dlr` | `"yes" \| "no"` | No | Solicitar DLR. Ignorado con `DLR_ENABLED=true` (siempre se solicita) |
+| `dlr_params` | `dict \| null` | No | Params concatenados como query a la `DLR_URL` centralizada. Solo con `DLR_ENABLED=true` |
+| `dlr_url` | `string \| null` | No | URL de callback DLR. Solo modo legacy; ignorado si el DLR está centralizado |
+| `dlr_level` | `int \| null` | No | Nivel de DLR. Default: env `DLR_LEVEL` |
+| `dlr_method` | `"GET" \| "POST" \| null` | No | Método HTTP del DLR. Default: env `DLR_METHOD` |
 
 ---
 

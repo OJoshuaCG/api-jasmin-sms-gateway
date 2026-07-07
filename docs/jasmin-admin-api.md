@@ -507,10 +507,11 @@ El sidecar proxea la HTTP API de Jasmin. Ningún puerto de Jasmin se expone exte
 | from | string | No | Sender ID / número origen. |
 | content | string | Sí | Texto del mensaje. |
 | coding | integer | No | 0=GSM7 (default), 8=UCS2, 1=binary. |
-| dlr | enum | No | `yes` \| `no`. |
-| dlr_url | string | No | URL para recibir el DLR. |
-| dlr_level | integer | No | 1=SMSC, 2=terminal, 3=ambos. |
-| dlr_method | enum | No | `GET` \| `POST`. |
+| dlr | enum | No | `yes` \| `no`. Ignorado con `DLR_ENABLED=true` (siempre se solicita DLR). |
+| dlr_params | dict | No | Params concatenados como query a la `DLR_URL` centralizada (ej. `{"org_id": 12}`). Solo con `DLR_ENABLED=true`. |
+| dlr_url | string | No | URL del DLR. Solo modo legacy (`DLR_ENABLED=false`); ignorado si el DLR está centralizado. |
+| dlr_level | integer | No | 1=SMSC, 2=terminal, 3=ambos. Default: env `DLR_LEVEL`. |
+| dlr_method | enum | No | `GET` \| `POST`. Default: env `DLR_METHOD`. |
 | priority | integer | No | 0–3. |
 | schedule_delivery_time | string | No | Timestamp SMPP para envío programado. |
 | validity_period | string | No | Validez del mensaje en formato SMPP. |

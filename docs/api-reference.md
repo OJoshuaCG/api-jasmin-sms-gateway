@@ -1730,10 +1730,11 @@ Envía un SMS outbound a través de la HTTP API de Jasmin.
 | `content` | string | Sí | Texto del mensaje | — | UTF-8 |
 | `from` | string | No | Sender ID o MSISDN | — | Requiere `mt_auth_src_addr=true` |
 | `coding` | int | No | `0`=GSM7, `1`=Binary, `8`=UCS-2 | `0` | Data coding scheme |
-| `dlr` | enum | No | `"yes"` \| `"no"` | `"no"` | Solicitar delivery receipt |
-| `dlr_url` | string | No | URL completa | — | Requerido si `dlr="yes"` |
-| `dlr_level` | int | No | `1`=final, `2`=intermedio, `3`=ambos | — | Nivel del DLR |
-| `dlr_method` | enum | No | `"GET"` \| `"POST"` | — | Método HTTP del callback DLR |
+| `dlr` | enum | No | `"yes"` \| `"no"` | `"no"` | Solicitar delivery receipt. Ignorado con `DLR_ENABLED=true` (siempre se solicita) |
+| `dlr_params` | dict | No | Ej. `{"org_id": 12}` | — | Params concatenados como query a la `DLR_URL` centralizada. Solo con `DLR_ENABLED=true` |
+| `dlr_url` | string | No | URL completa | — | Solo modo legacy (`DLR_ENABLED=false`); ignorado si el DLR está centralizado |
+| `dlr_level` | int | No | `1`=final, `2`=intermedio, `3`=ambos | env `DLR_LEVEL` | Nivel del DLR |
+| `dlr_method` | enum | No | `"GET"` \| `"POST"` | env `DLR_METHOD` | Método HTTP del callback DLR |
 | `priority` | int | No | `0`–`3` | — | Requiere `mt_auth_priority=true` |
 | `schedule_delivery_time` | string | No | `YYMMDDHHmmss000R` (relativo) o `YYMMDDHHmmssNNNp` (absoluto) | — | Envío programado |
 | `validity_period` | string | No | mismo formato | — | Tiempo máximo de validez |
@@ -1758,12 +1759,14 @@ Envía un SMS outbound a través de la HTTP API de Jasmin.
   "content": "Tu pedido #98234 fue enviado.",
   "from": "MiTienda",
   "coding": 0,
-  "dlr": "yes",
-  "dlr_url": "https://myapp.com/api/sms/dlr",
-  "dlr_level": 3,
-  "dlr_method": "POST"
+  "dlr_params": { "org_id": 12 }
 }
 ```
+> Con el DLR centralizado (`DLR_ENABLED=true`), la URL destino la fija el gateway
+> (`DLR_URL`) y **no** se envía en el body: solo se aportan `dlr_params`, que se
+> concatenan como query params a esa URL (ej. `DLR_URL?org_id=12`). Todos los
+> envíos solicitan DLR. Los campos `dlr_url`/`dlr_method`/`dlr_level` solo aplican
+> en modo legacy (`DLR_ENABLED=false`).
 
 **Ejemplo SMS Unicode (emoji/acentos):**
 ```json
@@ -1817,10 +1820,11 @@ Envía un SMS binario con contenido hex-encoded (WAP push, vCard, ringtones).
 | `hex_content` | string | Sí | hex (par de chars por byte) | — | Ej: `48656c6c6f` = "Hello" |
 | `coding` | int | No | `1`=Binary, `4`=8-bit, `8`=UCS-2 | `1` | Coding |
 | `from` | string | No | Sender ID | — | — |
-| `dlr` | enum | No | `"yes"` \| `"no"` | `"no"` | — |
-| `dlr_url` | string | No | URL | — | — |
-| `dlr_level` | int | No | `1` \| `2` \| `3` | — | — |
-| `dlr_method` | enum | No | `"GET"` \| `"POST"` | — | — |
+| `dlr` | enum | No | `"yes"` \| `"no"` | `"no"` | Ignorado con `DLR_ENABLED=true` |
+| `dlr_params` | dict | No | Ej. `{"org_id": 12}` | — | Query params a la `DLR_URL` centralizada. Solo con `DLR_ENABLED=true` |
+| `dlr_url` | string | No | URL | — | Solo legacy; ignorado si el DLR está centralizado |
+| `dlr_level` | int | No | `1` \| `2` \| `3` | env `DLR_LEVEL` | — |
+| `dlr_method` | enum | No | `"GET"` \| `"POST"` | env `DLR_METHOD` | — |
 
 **Ejemplo — enviar "Hello World" como binario:**
 ```json
