@@ -4,10 +4,20 @@ import time
 from asyncio import StreamReader, StreamWriter
 from typing import Optional
 
+from app.core import environments
+from app.core.context import current_http_identifier
 from app.core.logger import get_jcli_warnings_logger, get_logger
 
 logger = get_logger(__name__)
 _warnings_logger = get_jcli_warnings_logger()
+
+# Redacta valores de contraseña en comandos/campos jcli antes de loguear
+# (sintaxis jcli: "password <valor>" o "password=<valor>").
+_JCLI_PASSWORD_RE = re.compile(r"(?i)(password[=\s]+)\S+")
+
+
+def _redact_jcli(text: str) -> str:
+    return _JCLI_PASSWORD_RE.sub(r"\1***", text)
 
 # Matches jcli interactive-mode rejections like: "Unknown User key: mt_throughput"
 _UNKNOWN_KEY_RE = re.compile(r"Unknown \w+ key:\s*\S+", re.IGNORECASE)
@@ -306,10 +316,14 @@ class JasminTelnetSession:
             if not self._connected:
                 raise TelnetNotConnectedError("Jasmin jcli is not connected")
             try:
+                if environments.JASMIN_LOG:
+                    logger.info("%s | jcli → %s", current_http_identifier.get() or "-", _redact_jcli(command))
                 self._writer.write((self._sanitize(command) + "\r\n").encode())
                 await self._writer.drain()
                 response = await self._read_until(_MAIN_PROMPT)
                 response = self._strip_prompt(response)
+                if environments.JASMIN_LOG:
+                    logger.info("%s | jcli ← %s", current_http_identifier.get() or "-", _redact_jcli(response))
                 if persist:
                     await self._persist_unlocked()
                 return response
@@ -338,6 +352,8 @@ class JasminTelnetSession:
             if not self._connected:
                 raise TelnetNotConnectedError("Jasmin jcli is not connected")
             try:
+                if environments.JASMIN_LOG:
+                    logger.info("%s | jcli → %s", current_http_identifier.get() or "-", _redact_jcli(command))
                 self._writer.write((self._sanitize(command) + "\r\n").encode())
                 await self._writer.drain()
 
@@ -346,18 +362,25 @@ class JasminTelnetSession:
                 # Command returned to main prompt immediately — either an error
                 # or a non-interactive command (e.g. group --add)
                 if not self._is_interactive_match(matched):
+                    if environments.JASMIN_LOG:
+                        logger.info("%s | jcli ← %s", current_http_identifier.get() or "-", _redact_jcli(content.strip()))
                     return content.strip()
 
                 # Interactive mode: send each field assignment.
                 # _sanitize() strips CR/LF/NUL as a final defense layer — schema
                 # validators are the first line of defense, this protects the wire.
                 for key, value in fields:
+                    if environments.JASMIN_LOG:
+                        logged_value = "***" if "password" in key.lower() else str(value)
+                        logger.info("%s | jcli → %s %s", current_http_identifier.get() or "-", key, logged_value)
                     self._writer.write(f"{key} {self._sanitize(str(value))}\r\n".encode())
                     await self._writer.drain()
                     _content, next_match = await self._read_until_one_of(_ALL_PROMPTS)
                     self._log_jcli_warnings(_content, command, key)
                     # If jcli exited interactive mode early (validation error, etc.)
                     if not self._is_interactive_match(next_match):
+                        if environments.JASMIN_LOG:
+                            logger.info("%s | jcli ← %s", current_http_identifier.get() or "-", _redact_jcli(_content.strip()))
                         return _content.strip()
 
                 # Confirm and collect final result
@@ -373,6 +396,8 @@ class JasminTelnetSession:
                 else:
                     response = ok_content.strip()
 
+                if environments.JASMIN_LOG:
+                    logger.info("%s | jcli ← %s", current_http_identifier.get() or "-", _redact_jcli(response))
                 if persist:
                     await self._persist_unlocked()
                 return response

@@ -88,6 +88,11 @@ JASMIN_TELNET_TIMEOUT = int(os.getenv("JASMIN_TELNET_TIMEOUT", "10"))
 JASMIN_HTTP_HOST = os.getenv("JASMIN_HTTP_HOST", "localhost")
 JASMIN_HTTP_PORT = int(os.getenv("JASMIN_HTTP_PORT", "1401"))
 
+# Traza de diagnóstico: si True, loguea toda la comunicación con Jasmin (lo que
+# se le envía y lo que responde), tanto la HTTP API (/send, /rate, /balance) como
+# los comandos jcli/telnet. Las credenciales (password) se redactan. Default False.
+JASMIN_LOG = os.getenv("JASMIN_LOG", "False").lower() == "true"
+
 # ======= DLR (Delivery Receipt) variables ======= #
 # El DLR se centraliza en este gateway: la URL destino vive aquí (env), no la
 # especifica el cliente. En cada envío el cliente solo aporta `dlr_params`
